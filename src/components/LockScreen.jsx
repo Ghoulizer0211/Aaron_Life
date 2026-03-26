@@ -99,8 +99,12 @@ export default function LockScreen({ onUnlock }) {
       await biometricAuth(credId)
       sessionStorage.setItem('aaron_unlocked', '1')
       onUnlock()
-    } catch {
-      // user cancelled or failed — fall back to PIN silently
+    } catch (err) {
+      // Credential not found on this device — clear it so we stop retrying
+      if (err?.name === 'NotFoundError' || err?.name === 'InvalidStateError') {
+        localStorage.removeItem('aaron_security_cred_id')
+      }
+      // user cancelled or failed — fall through to PIN
     }
   }, [bioEnabled, biometricAvail, credId, onUnlock])
 
@@ -120,13 +124,19 @@ export default function LockScreen({ onUnlock }) {
     setError('')
 
     if (next.length === 6) {
-      const hash = await hashPin(next)
-      if (hash === storedHash) {
-        sessionStorage.setItem('aaron_unlocked', '1')
-        onUnlock()
-      } else {
-        setError('Incorrect passcode')
-        setTimeout(() => { setPin(''); setError('') }, 800)
+      try {
+        const hash = await hashPin(next)
+        if (hash === storedHash) {
+          sessionStorage.setItem('aaron_unlocked', '1')
+          onUnlock()
+        } else {
+          setError('Incorrect passcode')
+          setTimeout(() => { setPin(''); setError('') }, 800)
+        }
+      } catch {
+        // crypto.subtle unavailable (HTTP) — clear and show error
+        setError('Open via HTTPS or localhost')
+        setTimeout(() => { setPin(''); setError('') }, 2000)
       }
     }
   }, [pin, storedHash, onUnlock])
@@ -184,10 +194,15 @@ export function PinSetupSheet({ onDone, onClose }) {
       setStep('confirm')
     } else {
       if (next === first) {
-        const hash = await hashPin(next)
-        localStorage.setItem('aaron_security_pin_hash', hash)
-        onDone(hash)
-        onClose()
+        try {
+          const hash = await hashPin(next)
+          localStorage.setItem('aaron_security_pin_hash', hash)
+          onDone(hash)
+          onClose()
+        } catch {
+          setError('Requires HTTPS — use localhost or https://')
+          setTimeout(() => { setPin(''); setFirst(''); setStep('set'); setError('') }, 2000)
+        }
       } else {
         setError("Passcodes don't match — try again")
         setTimeout(() => { setPin(''); setFirst(''); setStep('set'); setError('') }, 900)
@@ -231,13 +246,18 @@ export function PinVerifySheet({ onVerified, onClose }) {
     setError('')
 
     if (next.length === 6) {
-      const hash = await hashPin(next)
-      if (hash === storedHash) {
-        onVerified()
-        onClose()
-      } else {
-        setError('Incorrect passcode')
-        setTimeout(() => { setPin(''); setError('') }, 800)
+      try {
+        const hash = await hashPin(next)
+        if (hash === storedHash) {
+          onVerified()
+          onClose()
+        } else {
+          setError('Incorrect passcode')
+          setTimeout(() => { setPin(''); setError('') }, 800)
+        }
+      } catch {
+        setError('Requires HTTPS — use localhost or https://')
+        setTimeout(() => { setPin(''); setError('') }, 2000)
       }
     }
   }

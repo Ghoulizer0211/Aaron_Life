@@ -12,12 +12,17 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('schedule')
   const [locked, setLocked] = useState(() => {
     // Resolve immediately — never show a blank screen
+    // On HTTP (non-secure context), crypto.subtle is unavailable so PIN can't work — skip lock
+    if (!window.isSecureContext) return false
     const hasPin   = !!localStorage.getItem('aaron_security_pin_hash')
     const unlocked = !!sessionStorage.getItem('aaron_unlocked')
     return hasPin && !unlocked
   })
 
   useEffect(() => {
+    // Skip security sync on HTTP — crypto.subtle not available
+    if (!window.isSecureContext) return
+
     const localHash = localStorage.getItem('aaron_security_pin_hash')
     const localCred = localStorage.getItem('aaron_security_cred_id')
     const sessionUnlocked = !!sessionStorage.getItem('aaron_unlocked')
@@ -51,11 +56,17 @@ export default function App() {
           }
         }
 
-        // Cross-device: server has hash but local doesn't → lock the screen
-        // NOTE: cred_id is device-specific (biometric) — never sync it to other devices
+        // Cross-device: server has hash but local doesn't → this is a different device
+        // Pull the PIN hash, but ALWAYS wipe any stale cred_id (biometrics are device-specific)
         if (d.pin_hash && !localHash) {
           localStorage.setItem('aaron_security_pin_hash', d.pin_hash)
+          localStorage.removeItem('aaron_security_cred_id')  // never inherit another device's credential
           if (!sessionUnlocked) setLocked(true)
+        }
+
+        // If server has no cred_id, also clear any leftover local cred_id
+        if (!d.cred_id) {
+          localStorage.removeItem('aaron_security_cred_id')
         }
       })
       .catch(() => { /* server unreachable — keep current state */ })
