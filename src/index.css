@@ -25,7 +25,7 @@
   --amber:  #ffe600;
 
   /* ── Layout ─────────────────────────────── */
-  --nav-height:    64px;
+  --nav-height:    54px;
   --header-height: 56px;
   --safe-bottom:   env(safe-area-inset-bottom, 0px);
   --safe-top:      env(safe-area-inset-top, 0px);
