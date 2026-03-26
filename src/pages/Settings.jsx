@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { PinSetupSheet, PinVerifySheet, registerBiometric } from '../components/LockScreen'
+import { supabase, sb } from '../lib/supabase'
 import './Page.css'
 import './Settings.css'
 
@@ -171,7 +172,11 @@ export default function Settings() {
     sessionStorage.removeItem('aaron_unlocked')
     setPasscodeOn(false)
     setBiometricOn(false)
-    fetch('/api/security/pin', { method: 'DELETE' }).catch(() => {})
+    if (supabase) {
+      sb(supabase.from('settings').delete().eq('key', 'pin_hash'))
+    } else {
+      fetch('/api/security/pin', { method: 'DELETE' }).catch(() => {})
+    }
   }
 
   const handleBiometricToggle = async () => {
@@ -380,11 +385,15 @@ export default function Settings() {
         <PinSetupSheet
           onDone={(hash) => {
             setPasscodeOn(true)
-            fetch('/api/security/pin', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ pin_hash: hash }),
-            }).catch(() => {})
+            if (supabase) {
+              sb(supabase.from('settings').upsert({ key: 'pin_hash', value: hash }))
+            } else {
+              fetch('/api/security/pin', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ pin_hash: hash }),
+              }).catch(() => {})
+            }
           }}
           onClose={() => setSheet(null)}
         />

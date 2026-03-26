@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
-import { supabase } from '../lib/supabase'
+import { supabase, sb } from '../lib/supabase'
 import './Page.css'
 import './Schedule.css'
 
@@ -139,9 +139,6 @@ function genId() {
 }
 
 // ─── Events hook (Supabase when configured, Express API as fallback) ──────────
-
-// Supabase query builder is thenable but not a full Promise — wrap to get .catch
-const sb = (query) => Promise.resolve(query).catch(() => {})
 
 function useEvents() {
   const [events, setEvents] = useState(() => {

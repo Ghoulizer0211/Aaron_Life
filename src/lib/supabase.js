@@ -11,3 +11,6 @@ if (!url || !key) {
 
 // supabase is null when env vars aren't set — app falls back to Express API
 export const supabase = (url && key) ? createClient(url, key) : null
+
+// Supabase query builder is thenable but not a full Promise — wrap to get .catch
+export const sb = (query) => Promise.resolve(query).catch(() => {})

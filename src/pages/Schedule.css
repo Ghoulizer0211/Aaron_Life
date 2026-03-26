@@ -44,14 +44,14 @@
 }
 
 .wnav-range {
-  font-size: 20px;
+  font-size: 15px;
   font-weight: 600;
   color: var(--text-primary);
   letter-spacing: -0.2px;
 }
 
 .wnav-today {
-  font-size: 17px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--accent);
   background: var(--accent-dim);
@@ -136,7 +136,7 @@
 .wh-day:last-child { border-right: none; }
 
 .wh-dow {
-  font-size: 16px;
+  font-size: 11px;
   font-weight: 600;
   color: var(--text-muted);
   text-transform: uppercase;
@@ -144,7 +144,7 @@
 }
 
 .wh-num {
-  font-size: 22px;
+  font-size: 17px;
   font-weight: 500;
   color: var(--text-secondary);
   line-height: 1;
@@ -210,7 +210,7 @@
   align-items: flex-start;
   justify-content: flex-end;
   padding: 3px 6px 0;
-  font-size: 13px;
+  font-size: 10px;
   font-weight: 500;
   color: var(--text-muted);
   letter-spacing: 0.2px;
@@ -310,7 +310,7 @@
 
 .ce-title {
   display: block;
-  font-size: 14px;
+  font-size: 11px;
   font-weight: 600;
   line-height: 1.35;
   white-space: nowrap;
@@ -321,7 +321,7 @@
 
 .ce-time {
   display: block;
-  font-size: 12px;
+  font-size: 9px;
   line-height: 1.3;
   opacity: 0.85;
   white-space: nowrap;
@@ -404,7 +404,7 @@
   flex-shrink: 0;
 }
 
-.modal-title { font-size: 22px; font-weight: 600; color: var(--text-primary); }
+.modal-title { font-size: 17px; font-weight: 600; color: var(--text-primary); }
 
 .modal-close {
   width: 30px; height: 30px;
@@ -431,7 +431,7 @@
 .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 
 .form-label {
-  font-size: 16px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--text-secondary);
   text-transform: uppercase;
@@ -445,7 +445,7 @@
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 11px 12px;
-  font-size: 19px;
+  font-size: 15px;
   color: var(--text-primary);
   font-family: inherit;
   width: 100%;
@@ -456,11 +456,11 @@
 .form-input:focus { border-color: var(--accent); }
 .form-input.input-error { border-color: var(--red); }
 .form-textarea { resize: none; line-height: 1.5; }
-.form-error { font-size: 16px; color: var(--red); }
+.form-error { font-size: 12px; color: var(--red); }
 
 /* Duration hint pill */
 .duration-hint {
-  font-size: 16px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--accent);
   background: var(--accent-dim);
@@ -498,7 +498,7 @@
   border-radius: 12px;
   background: var(--accent);
   color: #fff;
-  font-size: 19px;
+  font-size: 15px;
   font-weight: 600;
   font-family: inherit;
 }
@@ -509,7 +509,7 @@
   border-radius: 12px;
   background: rgba(224,92,92,0.12);
   color: var(--red);
-  font-size: 19px;
+  font-size: 15px;
   font-weight: 600;
   font-family: inherit;
   border: 1px solid rgba(224,92,92,0.25);
