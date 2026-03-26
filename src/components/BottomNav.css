@@ -7,14 +7,12 @@
   transform: translateX(-50%);
   width: 100%;
   max-width: 480px;
-  height: calc(var(--nav-height) + var(--safe-bottom));
-  padding-bottom: var(--safe-bottom);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
   background: rgba(10, 10, 10, 0.95);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
   border-top: 1px solid var(--border);
   z-index: 100;
-  position: fixed;
 }
 
 /* Neon top-glow line on mobile nav */

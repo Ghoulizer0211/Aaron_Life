@@ -188,7 +188,7 @@
   overflow-y: auto;
   overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
-  padding-bottom: calc(var(--nav-height) + var(--safe-bottom) + 60px);
+  padding-bottom: calc(var(--nav-height) + env(safe-area-inset-bottom, 0px) + 60px);
 }
 
 /* ── Inner flex layout: time col + day cols ────────────────────────────────── */
@@ -379,7 +379,7 @@
 
 .fab {
   position: fixed;
-  bottom: calc(var(--nav-height) + var(--safe-bottom) + 16px);
+  bottom: calc(var(--nav-height) + env(safe-area-inset-bottom, 0px) + 16px);
   right: max(16px, calc((100vw - 480px) / 2 + 16px));
   width: 52px;
   height: 52px;
@@ -430,7 +430,7 @@
   display: flex;
   flex-direction: column;
   animation: slideUp 0.25s cubic-bezier(0.32,0.72,0,1);
-  padding-bottom: var(--safe-bottom);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 @keyframes slideUp { from { transform: translateY(100%) } to { transform: translateY(0) } }
 
@@ -622,7 +622,7 @@
   display: flex;
   flex-direction: column;
   overflow-y: auto;
-  padding-bottom: calc(var(--nav-height) + var(--safe-bottom) + 60px);
+  padding-bottom: calc(var(--nav-height) + env(safe-area-inset-bottom, 0px) + 60px);
 }
 
 .month-dow-row {
