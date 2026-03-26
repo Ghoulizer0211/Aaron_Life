@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
+import { supabase } from '../lib/supabase'
 import './Page.css'
 import './Schedule.css'
 
@@ -137,7 +138,7 @@ function genId() {
   })
 }
 
-// ─── Server-synced events hook ────────────────────────────────────────────────
+// ─── Events hook (Supabase when configured, Express API as fallback) ──────────
 
 function useEvents() {
   const [events, setEvents] = useState(() => {
@@ -145,53 +146,60 @@ function useEvents() {
     catch { return [] }
   })
 
-  // Load from server on mount (overrides localStorage with canonical server data)
+  const save = (list) => {
+    localStorage.setItem('aaron_life_events', JSON.stringify(list))
+    return list
+  }
+
+  // Load canonical data on mount
   useEffect(() => {
-    fetch('/api/events')
-      .then(r => r.json())
-      .then(data => {
-        if (Array.isArray(data)) {
-          setEvents(data)
-          localStorage.setItem('aaron_life_events', JSON.stringify(data))
-        }
-      })
-      .catch(() => { /* server unreachable — keep localStorage data */ })
+    if (supabase) {
+      supabase.from('events').select('*').order('date')
+        .then(({ data }) => {
+          if (Array.isArray(data)) setEvents(save(data))
+        })
+    } else {
+      fetch('/api/events')
+        .then(r => r.json())
+        .then(data => { if (Array.isArray(data)) setEvents(save(data)) })
+        .catch(() => {})
+    }
   }, [])
 
-  const addEvent = async (d) => {
+  const addEvent = (d) => {
     const ev = { ...d, id: genId() }
-    setEvents(p => {
-      const next = [...p, ev]
-      localStorage.setItem('aaron_life_events', JSON.stringify(next))
-      return next
-    })
-    fetch('/api/events', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(ev),
-    }).catch(() => {})
+    setEvents(p => save([...p, ev]))
+    if (supabase) {
+      supabase.from('events').insert(ev).catch(() => {})
+    } else {
+      fetch('/api/events', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(ev),
+      }).catch(() => {})
+    }
   }
 
   const updateEvent = (id, d) => {
-    setEvents(p => {
-      const next = p.map(e => e.id === id ? { ...e, ...d } : e)
-      localStorage.setItem('aaron_life_events', JSON.stringify(next))
-      return next
-    })
-    fetch(`/api/events/${id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(d),
-    }).catch(() => {})
+    setEvents(p => save(p.map(e => e.id === id ? { ...e, ...d } : e)))
+    if (supabase) {
+      supabase.from('events').update(d).eq('id', id).catch(() => {})
+    } else {
+      fetch(`/api/events/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(d),
+      }).catch(() => {})
+    }
   }
 
   const deleteEvent = (id) => {
-    setEvents(p => {
-      const next = p.filter(e => e.id !== id)
-      localStorage.setItem('aaron_life_events', JSON.stringify(next))
-      return next
-    })
-    fetch(`/api/events/${id}`, { method: 'DELETE' }).catch(() => {})
+    setEvents(p => save(p.filter(e => e.id !== id)))
+    if (supabase) {
+      supabase.from('events').delete().eq('id', id).catch(() => {})
+    } else {
+      fetch(`/api/events/${id}`, { method: 'DELETE' }).catch(() => {})
+    }
   }
 
   return { events, addEvent, updateEvent, deleteEvent }
