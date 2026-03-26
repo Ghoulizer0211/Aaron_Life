@@ -323,6 +323,9 @@ function WeekGrid({ days, events, onCellClick, onEventClick, onEventToggle }) {
                         {m.height > SLOT_H * 0.75 && st && (
                           <span className="ce-time">{st}{et ? ` – ${et}` : ''}</span>
                         )}
+                        {ev.notes && m.height > SLOT_H && (
+                          <span className="ce-notes">{ev.notes}</span>
+                        )}
                       </div>
                     </div>
                   )
@@ -430,16 +433,6 @@ function EventModal({ initial, onSave, onDelete, onClose }) {
               })()}
             </div>
           )}
-
-          <div className="form-group">
-            <label className="form-label">Category <span className="form-optional">(optional)</span></label>
-            <input
-              className="form-input"
-              value={form.category}
-              onChange={e => set('category', e.target.value)}
-              placeholder="e.g. Work, Gym, School…"
-            />
-          </div>
 
           <div className="form-group">
             <label className="form-label">Color</label>

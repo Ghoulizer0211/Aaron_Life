@@ -28,19 +28,20 @@ export default function App() {
     const sessionUnlocked = !!sessionStorage.getItem('aaron_unlocked')
 
     const applyServerHash = (serverHash) => {
-      // Always clear stale biometric credential — device-specific, never shared
-      localStorage.removeItem('aaron_security_cred_id')
-
       if (serverHash && !localHash) {
         // Different device — pull the PIN hash and lock
+        // Clear cred_id only here since this device hasn't registered biometrics yet
         localStorage.setItem('aaron_security_pin_hash', serverHash)
+        localStorage.removeItem('aaron_security_cred_id')
         if (!sessionUnlocked) setLocked(true)
       }
       if (!serverHash && localHash) {
-        // PIN was disabled on another device — clear locally too
+        // PIN was disabled on another device — clear locally too (including biometrics)
         localStorage.removeItem('aaron_security_pin_hash')
+        localStorage.removeItem('aaron_security_cred_id')
         setLocked(false)
       }
+      // If serverHash === localHash: same device, don't touch cred_id
     }
 
     if (supabase) {
