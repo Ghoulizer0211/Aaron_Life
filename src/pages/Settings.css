@@ -1,0 +1,211 @@
+/* ── Profile card ────────────────────────────────────────────────────────────── */
+
+.settings-profile {
+  margin: 20px 20px 0;
+  padding: 16px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: calc(100% - 40px);
+  text-align: left;
+  -webkit-tap-highlight-color: transparent;
+  transition: border-color 0.15s;
+}
+.settings-profile:active { border-color: rgba(0, 229, 255, 0.3); }
+
+.profile-avatar {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--accent) 0%, #4ab8d4 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  font-weight: 700;
+  color: #fff;
+  flex-shrink: 0;
+  letter-spacing: -0.5px;
+}
+
+.profile-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.profile-name {
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.profile-sub {
+  font-size: 17px;
+  color: var(--text-secondary);
+}
+
+.profile-chevron {
+  width: 16px;
+  height: 16px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+/* ── Settings rows ───────────────────────────────────────────────────────────── */
+
+.settings-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  width: 100%;
+  text-align: left;
+  transition: background 0.12s;
+  -webkit-tap-highlight-color: transparent;
+}
+.settings-row:active { background: var(--bg-card-hover); }
+
+.settings-icon {
+  font-size: 20px;
+  width: 24px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.settings-label {
+  flex: 1;
+  font-size: 19px;
+  color: var(--text-primary);
+}
+
+.settings-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.settings-value {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.chevron {
+  width: 16px;
+  height: 16px;
+  color: var(--text-muted);
+}
+
+/* ── Toggle ──────────────────────────────────────────────────────────────────── */
+
+.toggle {
+  width: 36px;
+  height: 20px;
+  border-radius: 10px;
+  background: var(--border);
+  display: inline-block;
+  position: relative;
+  transition: background 0.2s;
+  flex-shrink: 0;
+}
+.toggle::after {
+  content: '';
+  position: absolute;
+  top: 3px; left: 3px;
+  width: 14px; height: 14px;
+  border-radius: 50%;
+  background: var(--text-secondary);
+  transition: transform 0.2s, background 0.2s;
+}
+.toggle.on { background: var(--accent); }
+.toggle.on::after { transform: translateX(16px); background: #fff; }
+
+/* ── Danger row ──────────────────────────────────────────────────────────────── */
+
+.danger-label { color: var(--red) !important; }
+.danger-row:active { background: rgba(255, 56, 100, 0.06) !important; }
+
+/* ── Settings hint ───────────────────────────────────────────────────────────── */
+
+.settings-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+  padding: 8px 4px 0;
+  line-height: 1.5;
+}
+
+/* ── Picker sheet ────────────────────────────────────────────────────────────── */
+
+.picker-list {
+  padding: 8px 16px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.picker-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-radius: 10px;
+  font-size: 15px;
+  color: var(--text-primary);
+  font-family: inherit;
+  transition: background 0.12s;
+  -webkit-tap-highlight-color: transparent;
+}
+.picker-item:active { background: var(--bg-card); }
+
+.picker-selected { color: var(--accent); font-weight: 600; }
+.picker-selected svg { width: 18px; height: 18px; color: var(--accent); }
+
+/* ── Confirm sheet ───────────────────────────────────────────────────────────── */
+
+.confirm-body {
+  padding: 20px 20px 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.confirm-message {
+  font-size: 14px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  text-align: center;
+}
+
+.confirm-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.confirm-cancel {
+  flex: 1;
+  padding: 14px;
+  border-radius: 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  font-family: inherit;
+}
+.confirm-cancel:active { background: var(--bg-card-hover); }
+
+.confirm-ok {
+  flex: 1;
+  padding: 14px;
+  border-radius: 12px;
+  font-size: 15px;
+  font-weight: 600;
+  font-family: inherit;
+}
+.confirm-ok.danger {
+  background: rgba(255, 56, 100, 0.12);
+  color: var(--red);
+  border: 1px solid rgba(255, 56, 100, 0.25);
+}
+.confirm-ok.danger:active { background: rgba(255, 56, 100, 0.22); }

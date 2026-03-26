@@ -1,0 +1,45 @@
+[
+  {
+    "id": "f1473433-c518-418f-839d-0e4d079578b8",
+    "title": "test",
+    "date": "2026-03-25",
+    "startTime": "16:30",
+    "endTime": "17:30",
+    "color": "#00e5ff",
+    "category": "",
+    "notes": "",
+    "done": true
+  },
+  {
+    "id": "53dd091c-8cbb-4863-a157-de3385acdd0a",
+    "title": "Gym ",
+    "date": "2026-03-26",
+    "startTime": "06:00",
+    "endTime": "08:00",
+    "color": "#ffe600",
+    "category": "",
+    "notes": "",
+    "done": false
+  },
+  {
+    "id": "67976226-82ff-4923-8c3a-9752f9de8c50",
+    "title": "test",
+    "date": "2026-03-26",
+    "startTime": "",
+    "endTime": "15:00",
+    "color": "#00e5ff",
+    "category": "",
+    "notes": ""
+  },
+  {
+    "id": "e08ab4a8-9a23-48f6-9a82-89f8f2b510ab",
+    "title": "Work",
+    "date": "2026-03-26",
+    "startTime": "10:30",
+    "endTime": "18:00",
+    "color": "#ff2d78",
+    "category": "",
+    "notes": "",
+    "done": false
+  }
+]

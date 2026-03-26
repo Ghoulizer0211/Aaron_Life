@@ -1,0 +1,203 @@
+/* ── Full-screen lock ────────────────────────────────────────────────────────── */
+
+.lock-screen {
+  position: fixed;
+  inset: 0;
+  background: var(--bg-primary);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  padding: calc(env(safe-area-inset-top, 0px) + 60px) 0 calc(env(safe-area-inset-bottom, 0px) + 40px);
+  z-index: 1000;
+}
+
+.lock-top {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.lock-icon {
+  width: 64px;
+  height: 64px;
+  border-radius: 20px;
+  background: var(--accent-dim);
+  border: 1px solid rgba(0, 229, 255, 0.2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent);
+  margin-bottom: 4px;
+}
+.lock-icon svg { width: 32px; height: 32px; }
+
+.lock-title {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text-primary);
+  font-family: 'Orbitron', sans-serif;
+  letter-spacing: 1px;
+}
+
+.lock-sub {
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+
+/* ── PIN dots ────────────────────────────────────────────────────────────────── */
+
+.lock-pad {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 24px;
+  width: 100%;
+  max-width: 320px;
+  padding: 0 20px;
+}
+
+.lock-dots {
+  display: flex;
+  gap: 16px;
+}
+
+.lock-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+  transition: background 0.15s, border-color 0.15s, transform 0.15s;
+}
+
+.lock-dot.filled {
+  background: var(--accent);
+  border-color: var(--accent);
+  box-shadow: 0 0 8px rgba(0, 229, 255, 0.5);
+  transform: scale(1.1);
+}
+
+.lock-dot.error {
+  border-color: var(--red);
+}
+.lock-dot.filled.error {
+  background: var(--red);
+  border-color: var(--red);
+  box-shadow: 0 0 8px rgba(255, 56, 100, 0.5);
+}
+
+.lock-error {
+  font-size: 13px;
+  color: var(--red);
+  margin-top: -12px;
+  height: 18px;
+}
+
+/* ── Number pad ──────────────────────────────────────────────────────────────── */
+
+.pad-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+  width: 100%;
+}
+
+.pad-btn {
+  height: 64px;
+  border-radius: 16px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  font-size: 22px;
+  font-weight: 500;
+  color: var(--text-primary);
+  font-family: inherit;
+  transition: background 0.1s, transform 0.1s;
+  -webkit-tap-highlight-color: transparent;
+}
+.pad-btn:active {
+  background: var(--bg-card-hover);
+  transform: scale(0.94);
+}
+
+.pad-back {
+  font-size: 18px;
+  color: var(--text-secondary);
+}
+
+/* ── Biometric button ────────────────────────────────────────────────────────── */
+
+.biometric-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--accent);
+  font-family: inherit;
+  padding: 10px 20px;
+  border-radius: 10px;
+  transition: background 0.15s;
+  -webkit-tap-highlight-color: transparent;
+}
+.biometric-btn svg { width: 22px; height: 22px; }
+.biometric-btn:active { background: var(--accent-dim); }
+
+/* ── PIN setup / verify sheet ────────────────────────────────────────────────── */
+
+.pinsetup-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.65);
+  z-index: 300;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  animation: fadeIn 0.2s ease;
+}
+
+.pinsetup-sheet {
+  width: 100%;
+  max-width: 480px;
+  background: var(--bg-secondary);
+  border-radius: 20px 20px 0 0;
+  border-top: 1px solid var(--border);
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 32px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 24px;
+  animation: slideUp 0.25s cubic-bezier(0.32,0.72,0,1);
+  padding-top: 8px;
+}
+
+.pinsetup-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 8px 20px 0;
+}
+
+.pinsetup-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.pinsetup-close {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: var(--bg-card);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+}
+.pinsetup-close svg { width: 14px; height: 14px; }
+
+@media (min-width: 768px) {
+  .pinsetup-overlay { align-items: center; }
+  .pinsetup-sheet   { border-radius: 16px; max-height: 80dvh; }
+}

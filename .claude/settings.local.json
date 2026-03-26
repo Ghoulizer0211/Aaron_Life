@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run:*)",
+      "Bash(taskkill /F /IM node.exe)",
+      "Bash(taskkill //F //IM node.exe)",
+      "Bash(cd:*)",
+      "Bash(npm install:*)",
+      "Bash(npm list:*)",
+      "WebSearch",
+      "WebFetch(domain:cloud.ouraring.com)",
+      "WebFetch(domain:support.ouraring.com)",
+      "WebFetch(domain:ouraring.com)",
+      "WebFetch(domain:developer.ouraring.com)",
+      "WebFetch(domain:python-ouraring.readthedocs.io)",
+      "WebFetch(domain:github.com)"
+    ]
+  }
+}

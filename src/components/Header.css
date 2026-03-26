@@ -1,0 +1,88 @@
+/* ── Mobile header ─────────────────────────────────────────────────────────── */
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: calc(var(--safe-top) + 12px) 20px 12px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  z-index: 10;
+  position: relative;
+}
+
+/* Subtle neon bottom glow on header */
+.header::after {
+  content: '';
+  position: absolute;
+  bottom: -1px;
+  left: 0; right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  opacity: 0.4;
+}
+
+.header-brand {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.header-app-name {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: var(--accent);
+  -webkit-text-fill-color: var(--accent);
+  text-shadow: 0 0 12px rgba(0, 229, 255, 0.7), 0 0 30px rgba(0, 229, 255, 0.3);
+  text-transform: uppercase;
+}
+
+.header-date {
+  font-size: 15px;
+  color: var(--text-secondary);
+  font-weight: 400;
+  letter-spacing: 0.3px;
+}
+
+.header-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-muted);
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+}
+
+/* Hidden on mobile */
+.header-date-right { display: none; }
+
+/* ── Desktop header ────────────────────────────────────────────────────────── */
+
+@media (min-width: 768px) {
+  .header {
+    padding: 18px 28px;
+    background: var(--bg-secondary);
+  }
+
+  .header-brand { display: none; }
+
+  .header-title {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 24px;
+    font-weight: 700;
+    color: var(--text-primary);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    text-shadow: 0 0 20px rgba(0, 229, 255, 0.2);
+  }
+
+  .header-date-right {
+    display: block;
+    font-size: 18px;
+    color: var(--text-secondary);
+    letter-spacing: 0.5px;
+    font-family: 'Exo 2', sans-serif;
+  }
+}
