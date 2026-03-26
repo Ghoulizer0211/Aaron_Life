@@ -43,7 +43,7 @@
   justify-content: flex-end;
   gap: 4px;
   flex: 1;
-  height: 30px;
+  height: var(--nav-height);
   padding: 2px 4px 0px;
   color: #c0c0c0;
   transition: color 0.2s ease;
