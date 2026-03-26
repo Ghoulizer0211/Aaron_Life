@@ -4,6 +4,8 @@ import { VitePWA } from 'vite-plugin-pwa'
 
 export default defineConfig({
   server: {
+    host: true,           // expose to LAN so iPhone can reach 192.168.x.x:5173
+    port: 5173,
     proxy: {
       '/api': 'http://localhost:3001',
     },

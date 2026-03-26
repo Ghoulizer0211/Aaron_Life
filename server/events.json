@@ -41,5 +41,15 @@
     "category": "",
     "notes": "",
     "done": false
+  },
+  {
+    "id": "c15124a0-17fa-4fee-8ce9-a78c33ca8217",
+    "title": "test",
+    "date": "2026-03-26",
+    "startTime": "08:30",
+    "endTime": "09:30",
+    "color": "#ff2d78",
+    "category": "",
+    "notes": ""
   }
 ]
