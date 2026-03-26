@@ -44,7 +44,7 @@
   gap: 4px;
   flex: 1;
   height: var(--nav-height);
-  padding: 6px 4px 0px;
+  padding: 2px 4px 0px;
   color: #c0c0c0;
   transition: color 0.2s ease;
   -webkit-tap-highlight-color: transparent;
