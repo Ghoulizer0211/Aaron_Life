@@ -217,10 +217,15 @@ function useEvents() {
 
 // ─── Week/Day Grid ────────────────────────────────────────────────────────────
 
-function WeekGrid({ days, events, onCellClick, onEventClick, onEventToggle }) {
-  const today   = todayStr()
-  const bodyRef = useRef(null)
-  const [nowTop, setNowTop] = useState(getNowTop)
+function WeekGrid({ days, events, onCellClick, onEventClick, onEventToggle, onEventUpdate }) {
+  const today        = todayStr()
+  const bodyRef      = useRef(null)
+  const weekInnerRef = useRef(null)
+  const dragRef      = useRef(null)
+  const justDraggedRef = useRef(false)
+  const [nowTop, setNowTop]     = useState(getNowTop)
+  const [dragState, setDragState] = useState(null)
+  // dragState: { evId, di, top, height, color, title }
 
   useEffect(() => {
     const t = setInterval(() => setNowTop(getNowTop()), 60_000)
@@ -233,6 +238,7 @@ function WeekGrid({ days, events, onCellClick, onEventClick, onEventToggle }) {
   }, []) // eslint-disable-line
 
   const handleColClick = (e, dateStr) => {
+    if (justDraggedRef.current) return
     const rect  = e.currentTarget.getBoundingClientRect()
     const relY  = e.clientY - rect.top
     const idx   = Math.max(0, Math.min(TIME_SLOTS.length - 1, Math.floor(relY / SLOT_H)))
@@ -241,6 +247,117 @@ function WeekGrid({ days, events, onCellClick, onEventClick, onEventToggle }) {
     const endH  = h + 1
     const endTime = endH < 24 ? slotToTime(endH, m) : '23:59'
     onCellClick(dateStr, startTime, endTime)
+  }
+
+  const handleDragStart = (e, ev, di) => {
+    if (ev.done) return
+    const metrics = getEventMetrics(ev)
+    if (!metrics) return
+
+    const startX = e.touches ? e.touches[0].clientX : e.clientX
+    const startY = e.touches ? e.touches[0].clientY : e.clientY
+    let holdTimer = null
+    let dragReady = false  // true after hold threshold met
+
+    // Cancel hold if finger moves too much before timer fires
+    const onEarlyMove = (moveEv) => {
+      const cx = moveEv.touches ? moveEv.touches[0].clientX : moveEv.clientX
+      const cy = moveEv.touches ? moveEv.touches[0].clientY : moveEv.clientY
+      if (Math.hypot(cx - startX, cy - startY) > 8) cancel()
+    }
+
+    const cancel = () => {
+      clearTimeout(holdTimer)
+      window.removeEventListener('mousemove', onEarlyMove)
+      window.removeEventListener('touchmove', onEarlyMove)
+      window.removeEventListener('mouseup', cancel)
+      window.removeEventListener('touchend', cancel)
+    }
+
+    const activateDrag = () => {
+      cancel()  // remove early-move listeners
+      dragReady = true
+
+      // Haptic feedback on mobile
+      if (navigator.vibrate) navigator.vibrate(40)
+
+      const cols = weekInnerRef.current?.querySelectorAll('.day-col')
+      if (cols?.[di]) {
+        const colRect = cols[di].getBoundingClientRect()
+        dragRef.current = {
+          ev, origDi: di, currentDi: di,
+          offsetY: startY - colRect.top + (bodyRef.current?.scrollTop || 0) - metrics.top,
+          height: metrics.height, currentTop: metrics.top, didDrag: false,
+        }
+      }
+      setDragState({ evId: ev.id, di, top: metrics.top, height: metrics.height, color: getEventColor(ev), title: ev.title })
+
+      const onMove = (moveEv) => {
+        if (!dragRef.current) return
+        moveEv.preventDefault()
+        const clientY = moveEv.touches ? moveEv.touches[0].clientY : moveEv.clientY
+        const clientX = moveEv.touches ? moveEv.touches[0].clientX : moveEv.clientX
+        dragRef.current.didDrag = true
+
+        const cols = weekInnerRef.current?.querySelectorAll('.day-col')
+        if (!cols) return
+        let targetDi = dragRef.current.currentDi
+        cols.forEach((col, i) => {
+          const r = col.getBoundingClientRect()
+          if (clientX >= r.left && clientX <= r.right) targetDi = i
+        })
+        const colRect = cols[targetDi].getBoundingClientRect()
+        const posInCol = clientY - colRect.top + (bodyRef.current?.scrollTop || 0) - dragRef.current.offsetY
+        const snapped  = Math.round(posInCol / SLOT_H) * SLOT_H
+        const clamped  = Math.max(0, Math.min(TOTAL_H - dragRef.current.height, snapped))
+        dragRef.current.currentTop = clamped
+        dragRef.current.currentDi  = targetDi
+        setDragState(prev => prev ? { ...prev, top: clamped, di: targetDi } : null)
+      }
+
+      const onUp = () => {
+        window.removeEventListener('mousemove', onMove)
+        window.removeEventListener('mouseup', onUp)
+        window.removeEventListener('touchmove', onMove)
+        window.removeEventListener('touchend', onUp)
+
+        if (!dragRef.current?.didDrag) { dragRef.current = null; setDragState(null); return }
+
+        justDraggedRef.current = true
+        setTimeout(() => { justDraggedRef.current = false }, 100)
+
+        const { ev, currentTop, currentDi } = dragRef.current
+        const slotIndex = Math.min(Math.floor(currentTop / SLOT_H), TIME_SLOTS.length - 1)
+        const slot = TIME_SLOTS[slotIndex]
+        const newStart = slotToTime(slot.h, slot.m)
+        const updates  = { startTime: newStart, date: dateToStr(days[currentDi]) }
+        if (ev.endTime && (ev.startTime || ev.time)) {
+          const [sh, sm] = (ev.startTime || ev.time).split(':').map(Number)
+          const [eh, em] = ev.endTime.split(':').map(Number)
+          const dur = (eh * 60 + em) - (sh * 60 + sm)
+          const newStartMin = slot.h * 60 + slot.m
+          const newEndMin   = newStartMin + dur
+          updates.endTime   = newEndMin <= 1440
+            ? slotToTime(Math.floor(newEndMin / 60), newEndMin % 60)
+            : '23:59'
+        }
+        onEventUpdate(ev.id, updates)
+        dragRef.current = null
+        setDragState(null)
+      }
+
+      window.addEventListener('mousemove', onMove)
+      window.addEventListener('mouseup', onUp)
+      window.addEventListener('touchmove', onMove, { passive: false })
+      window.addEventListener('touchend', onUp)
+    }
+
+    // Start hold timer — 600ms hold activates drag
+    holdTimer = setTimeout(activateDrag, 600)
+    window.addEventListener('mousemove', onEarlyMove)
+    window.addEventListener('touchmove', onEarlyMove, { passive: true })
+    window.addEventListener('mouseup', cancel)
+    window.addEventListener('touchend', cancel)
   }
 
   return (
@@ -261,7 +378,7 @@ function WeekGrid({ days, events, onCellClick, onEventClick, onEventToggle }) {
 
       {/* Scrollable body */}
       <div className="week-body" ref={bodyRef}>
-        <div className="week-inner">
+        <div className="week-inner" ref={weekInnerRef}>
 
           {/* Time-label column */}
           <div className="time-col" style={{ position: 'relative' }}>
@@ -302,22 +419,38 @@ function WeekGrid({ days, events, onCellClick, onEventClick, onEventToggle }) {
                   </div>
                 )}
 
+                {/* Drag overlay */}
+                {dragState && dragState.di === di && (
+                  <div
+                    className="cal-event ce-drag-overlay"
+                    style={{ top: dragState.top, height: dragState.height, background: `${dragState.color}40`, borderLeftColor: dragState.color }}
+                  >
+                    <div className="ce-body">
+                      <span className="ce-title">{dragState.title}</span>
+                    </div>
+                  </div>
+                )}
+
                 {dayEvs.map(ev => {
                   const m = getEventMetrics(ev)
                   if (!m || m.top < 0) return null
-                  const color = getEventColor(ev)
-                  const st = fmt12(ev.startTime || ev.time)
-                  const et = ev.endTime ? fmt12(ev.endTime) : ''
+                  const color    = getEventColor(ev)
+                  const st       = fmt12(ev.startTime || ev.time)
+                  const et       = ev.endTime ? fmt12(ev.endTime) : ''
+                  const dragging = dragState?.evId === ev.id
                   return (
                     <div
                       key={ev.id}
-                      className={`cal-event${ev.done ? ' ce-done' : ''}`}
-                      style={{ top: m.top, height: m.height, background: `${color}25`, borderLeftColor: color, color }}
-                      onClick={e => { e.stopPropagation(); onEventClick(ev) }}
+                      className={`cal-event${ev.done ? ' ce-done' : ''}${dragging ? ' ce-dragging' : ''}`}
+                      style={{ top: m.top, height: m.height, background: `${color}25`, borderLeftColor: color, color, cursor: ev.done ? 'default' : 'grab' }}
+                      onMouseDown={e => { if (!ev.done) { e.stopPropagation(); handleDragStart(e, ev, di) } }}
+                      onTouchStart={e => { if (!ev.done) { e.stopPropagation(); handleDragStart(e, ev, di) } }}
+                      onClick={e => { e.stopPropagation(); if (!ev.done && !justDraggedRef.current) onEventClick(ev) }}
                     >
                       <button
                         className={`ce-check${ev.done ? ' ce-check-on' : ''}`}
                         style={{ borderColor: color, background: ev.done ? color : 'transparent' }}
+                        onMouseDown={e => e.stopPropagation()}
                         onClick={e => { e.stopPropagation(); onEventToggle(ev.id, !ev.done) }}
                         aria-label={ev.done ? 'Mark undone' : 'Mark done'}
                       >
@@ -479,58 +612,152 @@ function EventModal({ initial, onSave, onDelete, onClose }) {
   )
 }
 
+// ─── Month Grid ───────────────────────────────────────────────────────────────
+
+function MonthGrid({ monthOffset, events, onDayClick, onEventClick }) {
+  const today = todayStr()
+  const now   = new Date()
+  const month = new Date(now.getFullYear(), now.getMonth() + monthOffset, 1)
+
+  // Build grid starting on Monday of first week
+  const dow   = month.getDay()
+  const start = new Date(month)
+  start.setDate(month.getDate() + (dow === 0 ? -6 : 1 - dow))
+
+  const weeks = Array.from({ length: 6 }, (_, w) =>
+    Array.from({ length: 7 }, (_, d) => {
+      const day = new Date(start)
+      day.setDate(start.getDate() + w * 7 + d)
+      return day
+    })
+  )
+  // Drop 6th row if all days are outside current month
+  const rows = weeks[5].every(d => d.getMonth() !== month.getMonth())
+    ? weeks.slice(0, 5) : weeks
+
+  return (
+    <div className="month-grid">
+      <div className="month-dow-row">
+        {['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map(d => (
+          <div key={d} className="month-dow">{d}</div>
+        ))}
+      </div>
+      {rows.map((week, wi) => (
+        <div key={wi} className="month-week">
+          {week.map((day, di) => {
+            const ds   = dateToStr(day)
+            const isToday   = ds === today
+            const inMonth   = day.getMonth() === month.getMonth()
+            const dayEvs    = events.filter(e => e.date === ds)
+            return (
+              <div
+                key={di}
+                className={`month-day${isToday ? ' month-today' : ''}${!inMonth ? ' month-other' : ''}`}
+                onClick={() => onDayClick(ds)}
+              >
+                <span className="month-day-num">{day.getDate()}</span>
+                <div className="month-evs">
+                  {dayEvs.slice(0, 3).map(ev => (
+                    <div
+                      key={ev.id}
+                      className={`month-ev${ev.done ? ' month-ev-done' : ''}`}
+                      style={{ background: `${getEventColor(ev)}35`, borderLeftColor: getEventColor(ev) }}
+                      onClick={e => { e.stopPropagation(); onEventClick(ev) }}
+                    >
+                      {ev.title}
+                    </div>
+                  ))}
+                  {dayEvs.length > 3 && (
+                    <div className="month-ev-more">+{dayEvs.length - 3} more</div>
+                  )}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      ))}
+    </div>
+  )
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 export default function Schedule() {
   const { events, addEvent, updateEvent, deleteEvent } = useEvents()
-  const [weekOffset, setWeekOffset] = useState(0)
-  const [dayOffset,  setDayOffset]  = useState(0)
-  const [isMobile,   setIsMobile]   = useState(() => window.innerWidth < 768)
+  const [isMobile,    setIsMobile]    = useState(() => window.innerWidth < 768)
+  const [view,        setView]        = useState(() => window.innerWidth < 768 ? 'day' : 'week')
+  const [weekOffset,  setWeekOffset]  = useState(0)
+  const [dayOffset,   setDayOffset]   = useState(0)
+  const [monthOffset, setMonthOffset] = useState(0)
   const [modal, setModal] = useState(null)
 
-  // Track screen width
   useEffect(() => {
-    const handler = () => setIsMobile(window.innerWidth < 768)
+    const handler = () => {
+      const mobile = window.innerWidth < 768
+      setIsMobile(mobile)
+      if (mobile) setView(v => v === 'week' ? 'day' : v)
+    }
     window.addEventListener('resize', handler)
     return () => window.removeEventListener('resize', handler)
   }, [])
 
-  // days array: 1 day on mobile, 7 days on desktop
-  const days = isMobile
-    ? [getDayFromOffset(dayOffset)]
-    : getWeekDays(weekOffset)
+  const days = view === 'day' ? [getDayFromOffset(dayOffset)] : getWeekDays(weekOffset)
 
-  const navLabel   = isMobile ? dayLabel(days[0]) : weekRangeLabel(days)
-  const isAtToday  = isMobile ? dayOffset === 0 : weekOffset === 0
+  const navLabel = () => {
+    if (view === 'month') {
+      const now = new Date()
+      const m = new Date(now.getFullYear(), now.getMonth() + monthOffset, 1)
+      return `${MONTH_SHORT[m.getMonth()]} ${m.getFullYear()}`
+    }
+    return view === 'day' ? dayLabel(days[0]) : weekRangeLabel(days)
+  }
 
-  const goPrev  = () => isMobile ? setDayOffset(o => o - 1)  : setWeekOffset(o => o - 1)
-  const goNext  = () => isMobile ? setDayOffset(o => o + 1)  : setWeekOffset(o => o + 1)
-  const goToday = () => { setDayOffset(0); setWeekOffset(0) }
+  const isAtToday = view === 'month' ? monthOffset === 0
+    : view === 'day' ? dayOffset === 0 : weekOffset === 0
 
-  // Jump to a specific date
+  const goPrev = () => {
+    if (view === 'day') setDayOffset(o => o - 1)
+    else if (view === 'week') setWeekOffset(o => o - 1)
+    else setMonthOffset(o => o - 1)
+  }
+  const goNext = () => {
+    if (view === 'day') setDayOffset(o => o + 1)
+    else if (view === 'week') setWeekOffset(o => o + 1)
+    else setMonthOffset(o => o + 1)
+  }
+  const goToday = () => { setDayOffset(0); setWeekOffset(0); setMonthOffset(0) }
+
   const handleDatePick = (e) => {
-    const val = e.target.value  // "YYYY-MM-DD"
+    const val = e.target.value
     if (!val) return
     const picked = new Date(val + 'T00:00:00')
     const today  = new Date(); today.setHours(0, 0, 0, 0)
-    if (isMobile) {
-      const diff = Math.round((picked - today) / (1000 * 60 * 60 * 24))
-      setDayOffset(diff)
+    if (view === 'day') {
+      setDayOffset(Math.round((picked - today) / 86400000))
+    } else if (view === 'month') {
+      const now = new Date()
+      setMonthOffset((picked.getFullYear() - now.getFullYear()) * 12 + picked.getMonth() - now.getMonth())
     } else {
-      // Navigate to the week containing the picked date
-      const pickedDow = picked.getDay()
-      const toMon = pickedDow === 0 ? -6 : 1 - pickedDow
-      const pickedMonday = new Date(picked); pickedMonday.setDate(picked.getDate() + toMon)
-      const todayDow = today.getDay()
-      const todayToMon = todayDow === 0 ? -6 : 1 - todayDow
-      const thisMonday = new Date(today); thisMonday.setDate(today.getDate() + todayToMon)
-      const weekDiff = Math.round((pickedMonday - thisMonday) / (7 * 24 * 60 * 60 * 1000))
-      setWeekOffset(weekDiff)
+      const toMon = (d) => d.getDay() === 0 ? -6 : 1 - d.getDay()
+      const pickedMon = new Date(picked); pickedMon.setDate(picked.getDate() + toMon(picked))
+      const thisMon   = new Date(today);  thisMon.setDate(today.getDate() + toMon(today))
+      setWeekOffset(Math.round((pickedMon - thisMon) / (7 * 86400000)))
     }
   }
 
+  const handleMonthDayClick = (ds) => {
+    const picked = new Date(ds + 'T00:00:00')
+    const today  = new Date(); today.setHours(0, 0, 0, 0)
+    setDayOffset(Math.round((picked - today) / 86400000))
+    setView('day')
+  }
+
+  const pickerValue = view === 'month'
+    ? (() => { const now = new Date(); const m = new Date(now.getFullYear(), now.getMonth() + monthOffset, 1); return dateToStr(m) })()
+    : dateToStr(days[0])
+
   const openAdd  = (date, startTime, endTime) =>
-    setModal({ initial: { date, startTime: startTime || '', endTime: endTime || '', title: '', category: '', color: COLOR_PRESETS[0], notes: '' } })
+    setModal({ initial: { date, startTime: startTime || '', endTime: endTime || '', title: '', color: COLOR_PRESETS[0], notes: '' } })
   const openEdit   = (ev) => setModal({ initial: ev })
   const closeModal = ()   => setModal(null)
 
@@ -551,17 +778,12 @@ export default function Schedule() {
         <div className="wnav-center">
           <div className="wnav-date-wrap">
             <span className="wnav-range wnav-date-btn">
-              {navLabel}
+              {navLabel()}
               <svg className="wnav-cal-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
               </svg>
             </span>
-            <input
-              type="date"
-              className="wnav-date-input"
-              value={dateToStr(isMobile ? days[0] : days[0])}
-              onChange={handleDatePick}
-            />
+            <input type="date" className="wnav-date-input" value={pickerValue} onChange={handleDatePick} />
           </div>
           {!isAtToday && (
             <button className="wnav-today" onClick={goToday}>Today</button>
@@ -574,14 +796,31 @@ export default function Schedule() {
         </button>
       </div>
 
+      <div className="view-toggle">
+        {(isMobile ? ['day','month'] : ['day','week','month']).map(v => (
+          <button key={v} className={`vt-btn${view === v ? ' vt-active' : ''}`} onClick={() => setView(v)}>
+            {v.charAt(0).toUpperCase() + v.slice(1)}
+          </button>
+        ))}
+      </div>
 
-      <WeekGrid
-        days={days}
-        events={events}
-        onCellClick={openAdd}
-        onEventClick={openEdit}
-        onEventToggle={(id, done) => updateEvent(id, { done })}
-      />
+      {view === 'month' ? (
+        <MonthGrid
+          monthOffset={monthOffset}
+          events={events}
+          onDayClick={handleMonthDayClick}
+          onEventClick={openEdit}
+        />
+      ) : (
+        <WeekGrid
+          days={days}
+          events={events}
+          onCellClick={openAdd}
+          onEventClick={openEdit}
+          onEventToggle={(id, done) => updateEvent(id, { done })}
+          onEventUpdate={updateEvent}
+        />
+      )}
 
       <button className="fab" onClick={() => openAdd(todayStr(), '', '')} aria-label="Add event">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
