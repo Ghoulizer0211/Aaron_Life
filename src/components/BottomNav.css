@@ -7,7 +7,7 @@
   transform: translateX(-50%);
   width: 100%;
   max-width: 480px;
-  padding-bottom: max(calc(env(safe-area-inset-bottom, 0px) - 20px), 6px);
+  padding-bottom: 4px;
   background: rgba(10, 10, 10, 0.95);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
