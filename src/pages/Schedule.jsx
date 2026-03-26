@@ -140,8 +140,13 @@ function genId() {
 
 // ─── Events hook (Supabase when configured, Express API as fallback) ──────────
 
+// Supabase query builder is thenable but not a full Promise — wrap to get .catch
+const sb = (query) => Promise.resolve(query).catch(() => {})
+
 function useEvents() {
   const [events, setEvents] = useState(() => {
+    // If Supabase is configured, don't pre-load stale localStorage data
+    if (supabase) return []
     try { return JSON.parse(localStorage.getItem('aaron_life_events') || '[]') }
     catch { return [] }
   })
@@ -154,9 +159,11 @@ function useEvents() {
   // Load canonical data on mount
   useEffect(() => {
     if (supabase) {
-      supabase.from('events').select('*').order('date')
-        .then(({ data }) => {
-          if (Array.isArray(data)) setEvents(save(data))
+      // Clear any stale local data and load fresh from Supabase
+      localStorage.removeItem('aaron_life_events')
+      sb(supabase.from('events').select('*').order('date'))
+        .then(({ data } = {}) => {
+          if (Array.isArray(data)) setEvents(data)
         })
     } else {
       fetch('/api/events')
@@ -168,9 +175,9 @@ function useEvents() {
 
   const addEvent = (d) => {
     const ev = { ...d, id: genId() }
-    setEvents(p => save([...p, ev]))
+    setEvents(p => supabase ? [...p, ev] : save([...p, ev]))
     if (supabase) {
-      supabase.from('events').insert(ev).catch(() => {})
+      sb(supabase.from('events').insert(ev))
     } else {
       fetch('/api/events', {
         method: 'POST',
@@ -181,9 +188,12 @@ function useEvents() {
   }
 
   const updateEvent = (id, d) => {
-    setEvents(p => save(p.map(e => e.id === id ? { ...e, ...d } : e)))
+    setEvents(p => {
+      const next = p.map(e => e.id === id ? { ...e, ...d } : e)
+      return supabase ? next : save(next)
+    })
     if (supabase) {
-      supabase.from('events').update(d).eq('id', id).catch(() => {})
+      sb(supabase.from('events').update(d).eq('id', id))
     } else {
       fetch(`/api/events/${id}`, {
         method: 'PUT',
@@ -194,9 +204,12 @@ function useEvents() {
   }
 
   const deleteEvent = (id) => {
-    setEvents(p => save(p.filter(e => e.id !== id)))
+    setEvents(p => {
+      const next = p.filter(e => e.id !== id)
+      return supabase ? next : save(next)
+    })
     if (supabase) {
-      supabase.from('events').delete().eq('id', id).catch(() => {})
+      sb(supabase.from('events').delete().eq('id', id))
     } else {
       fetch(`/api/events/${id}`, { method: 'DELETE' }).catch(() => {})
     }
