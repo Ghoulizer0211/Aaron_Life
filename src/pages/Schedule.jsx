@@ -264,10 +264,19 @@ function WeekGrid({ days, events, onCellClick, onEventClick, onEventToggle }) {
         <div className="week-inner">
 
           {/* Time-label column */}
-          <div className="time-col">
+          <div className="time-col" style={{ position: 'relative' }}>
             {TIME_SLOTS.map(({ h, m }, i) => (
               <div key={i} className="time-label">{slotLabel(h, m)}</div>
             ))}
+            {days.some(d => dateToStr(d) === today) && (
+              <div className="now-time-label" style={{ top: nowTop }}>
+                {(() => {
+                  const n = new Date()
+                  const h = n.getHours(), m = n.getMinutes()
+                  return `${h % 12 || 12}:${String(m).padStart(2,'0')}`
+                })()}
+              </div>
+            )}
           </div>
 
           {/* One column per day */}

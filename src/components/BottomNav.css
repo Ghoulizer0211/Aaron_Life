@@ -47,7 +47,7 @@
   flex: 1;
   height: var(--nav-height);
   padding: 8px 4px;
-  color: var(--text-muted);
+  color: #c0c0c0;
   transition: color 0.2s ease;
   -webkit-tap-highlight-color: transparent;
   position: relative;
@@ -178,7 +178,7 @@
     border-radius: 8px;
     justify-content: flex-start;
     gap: 12px;
-    color: var(--text-secondary);
+    color: #c0c0c0;
     font-size: 20px;
     text-shadow: none;
     transition: background 0.15s, color 0.15s;
