@@ -249,15 +249,15 @@ function useFinanceData() {
     const init = async () => {
       setLoading(true)
       try {
-        const statusRes = await fetch('/api/teller/status')
-        const status    = await statusRes.json()
-        if (status.linked) {
-          await Promise.all([loadSummary(), loadTransactions(month)])
-        }
-      } catch { /* server offline */ }
+        // Always attempt to load data — if Supabase has rows the summary will
+        // come back populated and the dashboard shows. The teller/status check
+        // was gating this unnecessarily when the Express server isn't running
+        // (e.g. Vercel deployment).
+        await Promise.all([loadSummary(), loadTransactions(month)])
+      } catch { /* ignore */ }
       finally {
         setLoading(false)
-        didInit.current = true  // mark init complete so month-change effect is now safe to run
+        didInit.current = true
       }
     }
     init()
