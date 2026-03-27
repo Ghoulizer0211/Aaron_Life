@@ -1,8 +1,15 @@
-import { getSupabase, nextMonthStart } from '../_lib/supabase.js'
+import { createClient } from '@supabase/supabase-js'
+
+function nextMonthStart(month) {
+  const [y, m] = month.split('-').map(Number)
+  return m === 12 ? `${y + 1}-01-01` : `${y}-${String(m + 1).padStart(2, '0')}-01`
+}
 
 export default async function handler(req, res) {
-  const supabase = getSupabase()
-  if (!supabase) return res.json([])
+  const url = process.env.VITE_SUPABASE_URL
+  const key = process.env.VITE_SUPABASE_ANON_KEY
+  if (!url || !key) return res.json([])
+  const supabase = createClient(url, key)
 
   try {
     const { month, accountId, limit = 500 } = req.query
@@ -19,7 +26,6 @@ export default async function handler(req, res) {
     if (error) throw error
     res.json(data || [])
   } catch (err) {
-    console.error('[vercel/finance/transactions]', err.message)
     res.status(500).json({ error: err.message })
   }
 }
