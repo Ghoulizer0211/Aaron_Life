@@ -43,20 +43,6 @@ html, body {
   overflow: hidden;
 }
 
-/* Subtle CRT scanline overlay */
-body::after {
-  content: '';
-  position: fixed;
-  inset: 0;
-  background: repeating-linear-gradient(
-    transparent 0px,
-    transparent 2px,
-    rgba(0, 0, 30, 0.07) 2px,
-    rgba(0, 0, 30, 0.07) 3px
-  );
-  pointer-events: none;
-  z-index: 9999;
-}
 
 #root {
   position: fixed;

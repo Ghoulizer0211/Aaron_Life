@@ -25,4 +25,8 @@ dist-ssr
 
 # Secrets & local data
 .env
+.env.local
+.env.development
+.env.production
 server/tokens.json
+teller/
