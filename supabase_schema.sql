@@ -27,7 +27,9 @@ create table if not exists bank_accounts (
   available_balance numeric not null default 0,
   last_four         text,
   institution_name  text,
-  last_synced_at    timestamptz
+  last_synced_at    timestamptz,
+  source            text not null default 'teller',  -- 'teller' | 'snaptrade'
+  snap_account_id   text                             -- SnapTrade's internal account ID
 );
 
 
@@ -66,7 +68,25 @@ create index if not exists balance_snapshots_date_idx
   on balance_snapshots (snapshot_date);
 
 
--- ── 5. Settings (stores PIN hash for app lock) ────────────────────────────────
+-- ── 5. Gym workouts ──────────────────────────────────────────────────────────
+
+create table if not exists gym_workouts (
+  id               uuid default gen_random_uuid() primary key,
+  date             date not null,
+  type             text not null,          -- Push | Pull | Legs | Full Body | Cardio | Rest
+  duration_minutes integer,
+  intensity        text,                   -- Light | Moderate | Heavy
+  notes            text,
+  exercises        jsonb default '[]'::jsonb,  -- [{name, sets:[{reps, weight}]}]
+  created_at       timestamptz default now()
+);
+
+create index if not exists gym_workouts_date_idx on gym_workouts (date desc);
+
+alter table gym_workouts disable row level security;
+
+
+-- ── 6. Settings (stores PIN hash for app lock) ────────────────────────────────
 
 create table if not exists settings (
   key   text primary key,
@@ -102,3 +122,10 @@ alter table bank_transactions  disable row level security;
 alter table balance_snapshots  disable row level security;
 alter table settings           disable row level security;
 alter table events             disable row level security;
+
+
+-- ── Migration: add SnapTrade columns (run if table already exists) ────────────
+-- Safe to run multiple times (IF NOT EXISTS / idempotent)
+
+alter table bank_accounts add column if not exists source           text not null default 'teller';
+alter table bank_accounts add column if not exists snap_account_id  text;

@@ -112,38 +112,24 @@ function useTellerConnect({ onSuccess, onError }) {
   return { open, ready }
 }
 
-// ── SnapTrade / Vanguard Hook ─────────────────────────────────────────────────
+// ── SnapTrade Hook ────────────────────────────────────────────────────────────
 
 function useSnaptradeData() {
-  const [snapLinked,   setSnapLinked]   = useState(false)
-  const [snapHoldings, setSnapHoldings] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('aaron_snap_holdings') || 'null') }
-    catch { return null }
-  })
+  const [snapLinked,  setSnapLinked]  = useState(false)
   const [snapLoading, setSnapLoading] = useState(false)
   const [snapError,   setSnapError]   = useState(null)
 
-  const loadHoldings = useCallback(async () => {
+  const checkStatus = useCallback(async () => {
     try {
-      const res  = await fetch('/api/snaptrade/holdings')
-      if (!res.ok) return
-      const data = await res.json()
-      setSnapHoldings(data)
-      localStorage.setItem('aaron_snap_holdings', JSON.stringify(data))
-    } catch { /* ignore */ }
+      const res  = await fetch('/api/snaptrade/status')
+      const { registered, accountCount } = await res.json()
+      const linked = registered && accountCount > 0
+      setSnapLinked(linked)
+      return linked
+    } catch { return false }
   }, [])
 
-  useEffect(() => {
-    const init = async () => {
-      try {
-        const res     = await fetch('/api/snaptrade/status')
-        const { linked } = await res.json()
-        setSnapLinked(linked)
-        if (linked) await loadHoldings()
-      } catch { /* server offline */ }
-    }
-    init()
-  }, [loadHoldings])
+  useEffect(() => { checkStatus() }, [checkStatus])
 
   const connect = async () => {
     setSnapLoading(true)
@@ -165,30 +151,30 @@ function useSnaptradeData() {
     }
   }
 
-  // Called after user finishes OAuth in the new tab and comes back
-  const afterConnect = async () => {
+  // Called after user finishes in the portal — syncs accounts to bank_accounts then reloads summary
+  const afterConnect = async (onSynced) => {
     setSnapLoading(true)
+    setSnapError(null)
     try {
-      const res        = await fetch('/api/snaptrade/status')
-      const { linked } = await res.json()
-      setSnapLinked(linked)
-      if (linked) await loadHoldings()
-    } catch { /* ignore */ }
-    finally { setSnapLoading(false) }
+      const syncRes  = await fetch('/api/snaptrade/sync', { method: 'POST' })
+      const syncData = await syncRes.json()
+      if (!syncRes.ok) throw new Error(syncData.error || 'Sync failed')
+      await checkStatus()
+      if (onSynced) onSynced()
+    } catch (err) {
+      setSnapError(err.message)
+    } finally {
+      setSnapLoading(false)
+    }
   }
 
-  const disconnect = async () => {
+  const disconnect = async (onDisconnected) => {
     await fetch('/api/snaptrade/disconnect', { method: 'DELETE' })
     setSnapLinked(false)
-    setSnapHoldings(null)
-    localStorage.removeItem('aaron_snap_holdings')
+    if (onDisconnected) onDisconnected()
   }
 
-  const snapTotal = (snapHoldings || []).reduce((sum, acct) => {
-    return sum + (acct.balances?.[0]?.total_value ?? 0)
-  }, 0)
-
-  return { snapLinked, snapHoldings, snapLoading, snapError, snapTotal, connect, afterConnect, disconnect, loadHoldings }
+  return { snapLinked, snapLoading, snapError, snapTotal: 0, connect, afterConnect, disconnect }
 }
 
 // ── Finance Data Hook ─────────────────────────────────────────────────────────
@@ -367,7 +353,7 @@ function useFinanceData() {
 
   return {
     summary, transactions, enrollments, loading, syncing, error, month,
-    setMonth, setError, sync, onTellerSuccess, disconnect, disconnectAll,
+    setMonth, setError, sync, load: loadSummary, onTellerSuccess, disconnect, disconnectAll,
     updateAccountCategory, updateTransactionCategory,
   }
 }
@@ -741,116 +727,71 @@ function CreditDetail({ summary, transactions, month, setMonth, onCategoryChange
   )
 }
 
-function InvestmentsDetail({ summary, snap, onBack }) {
-  const tellerAccounts = summary?.investments?.accounts || []
-  const tellerTotal    = summary?.investments?.total    || 0
-  const combinedTotal  = tellerTotal + snap.snapTotal
+function InvestmentsDetail({ summary, snap, transactions, month, setMonth, onReload, onCategoryChange, onTxCategoryChange, onBack }) {
+  const accounts = summary?.investments?.accounts || []
+  const total    = summary?.investments?.total    || 0
 
   return (
     <div className="page">
       <div className="fin-detail-header">
         <button className="fin-back-btn" onClick={onBack}>‹ Back</button>
         <h2 className="section-title">Investments</h2>
+        <MonthSelector month={month} onChange={setMonth} />
       </div>
 
       <section className="page-section">
         <div className="card net-worth-card">
           <span className="nw-label">Total Investments</span>
-          <span className="nw-value">{fmtUSD(combinedTotal)}</span>
+          <span className="nw-value">{fmtUSD(total)}</span>
         </div>
       </section>
 
-      {/* Teller investment accounts */}
-      {tellerAccounts.length > 0 && (
+      {accounts.length > 0 && (
         <section className="page-section">
-          <h2 className="section-title">Brokerage (Teller)</h2>
-          <div className="card-list">
-            {tellerAccounts.map((a, i) => (
-              <div key={a.account_id || i} className="card row-card">
-                <div className="acc-left">
-                  <span className="acc-icon invest" />
-                  <div className="acc-info">
-                    <span className="acc-name">{a.account_name || a.name}</span>
-                    {a.last_four && <span className="acc-mask">•••• {a.last_four}</span>}
-                  </div>
-                </div>
-                <span className="acc-balance">{fmtUSD(a.current_balance ?? a.balance)}</span>
-              </div>
+          <div className="fin-accordion-list">
+            {accounts.map((a, i) => (
+              <AccordionAccount
+                key={a.account_id || i}
+                account={a}
+                transactions={transactions}
+                onCategoryChange={onCategoryChange}
+                onTxCategoryChange={onTxCategoryChange}
+              />
             ))}
           </div>
         </section>
       )}
 
-      {/* SnapTrade / Vanguard */}
+      {/* SnapTrade connection portal */}
       <section className="page-section">
         <div className="section-header">
-          <h2 className="section-title">Vanguard (SnapTrade)</h2>
+          <h2 className="section-title">Connect Account</h2>
           {snap.snapLinked && (
-            <button className="action-btn" style={{ color: 'var(--red)' }} onClick={snap.disconnect}>
+            <button className="action-btn" style={{ color: 'var(--red)' }}
+              onClick={() => snap.disconnect(onReload)}>
               Disconnect
             </button>
           )}
         </div>
-
-        {!snap.snapLinked ? (
-          <div className="card" style={{ padding: '20px 16px', display: 'flex', flexDirection: 'column', gap: '12px', alignItems: 'flex-start' }}>
-            <p style={{ color: 'var(--text-secondary)', fontSize: '14px', lineHeight: 1.6 }}>
-              Connect your Vanguard account to see holdings and balances here.
-            </p>
-            {snap.snapError && <p style={{ color: 'var(--red)', fontSize: '13px' }}>{snap.snapError}</p>}
-            <button className="connect-btn" style={{ fontSize: '15px', padding: '10px 24px', alignSelf: 'center' }}
-              onClick={snap.connect} disabled={snap.snapLoading}>
-              {snap.snapLoading ? 'Opening…' : 'Connect Vanguard'}
-            </button>
-            <p style={{ color: 'var(--text-muted)', fontSize: '12px', alignSelf: 'center' }}>
-              A SnapTrade page will open in a new tab. After connecting, come back and tap below.
-            </p>
-            <button className="action-btn" style={{ alignSelf: 'center' }}
-              onClick={snap.afterConnect} disabled={snap.snapLoading}>
-              ✓ Done — I connected my account
-            </button>
-          </div>
-        ) : !snap.snapHoldings ? (
-          <div className="card" style={{ padding: '20px 16px', textAlign: 'center', color: 'var(--text-muted)' }}>
-            Loading holdings…
-          </div>
-        ) : snap.snapHoldings.length === 0 ? (
-          <div className="card" style={{ padding: '20px 16px', textAlign: 'center', color: 'var(--text-muted)' }}>
-            No accounts found. Make sure you completed the connection in the SnapTrade portal.
-          </div>
-        ) : (
-          snap.snapHoldings.map((acct, i) => {
-            const total     = acct.balances?.[0]?.total_value ?? 0
-            const positions = acct.positions || []
-            return (
-              <div key={i} style={{ marginBottom: '12px' }}>
-                <div className="card row-card">
-                  <div className="acc-left">
-                    <span className="acc-icon invest" />
-                    <div className="acc-info">
-                      <span className="acc-name">{acct.account?.name || 'Vanguard Account'}</span>
-                      {acct.account?.number && <span className="acc-mask">•••• {acct.account.number.slice(-4)}</span>}
-                    </div>
-                  </div>
-                  <span className="acc-balance">{fmtUSD(total)}</span>
-                </div>
-                {positions.length > 0 && (
-                  <div className="card-list" style={{ marginTop: '1px', borderTopLeftRadius: 0, borderTopRightRadius: 0 }}>
-                    {positions.map((p, j) => (
-                      <div key={j} className="tx-row">
-                        <div className="tx-info">
-                          <span className="tx-name">{p.symbol?.symbol} · {p.symbol?.description || ''}</span>
-                          <span className="tx-date">{p.units} shares @ {fmtUSD(p.price)}</span>
-                        </div>
-                        <span className="acc-balance">{fmtUSD((p.units ?? 0) * (p.price ?? 0))}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )
-          })
-        )}
+        <div className="card" style={{ padding: '20px 16px', display: 'flex', flexDirection: 'column', gap: '12px', alignItems: 'flex-start' }}>
+          <p style={{ color: 'var(--text-secondary)', fontSize: '14px', lineHeight: 1.6 }}>
+            {snap.snapLinked
+              ? 'Add another account (Vanguard, TSP, Fidelity, Schwab, and more).'
+              : 'Connect your investment accounts to see balances and transactions. Supports Vanguard, TSP, Fidelity, Schwab, and more.'}
+          </p>
+          {snap.snapError && <p style={{ color: 'var(--red)', fontSize: '13px' }}>{snap.snapError}</p>}
+          <button className="connect-btn" style={{ fontSize: '15px', padding: '10px 24px', alignSelf: 'center' }}
+            onClick={snap.connect} disabled={snap.snapLoading}>
+            {snap.snapLoading ? 'Opening…' : snap.snapLinked ? '+ Add Another Account' : 'Connect Investment Account'}
+          </button>
+          <p style={{ color: 'var(--text-muted)', fontSize: '12px', alignSelf: 'center' }}>
+            A SnapTrade page will open in a new tab. After connecting, come back and tap below.
+          </p>
+          <button className="action-btn" style={{ alignSelf: 'center' }}
+            onClick={() => snap.afterConnect(onReload)} disabled={snap.snapLoading}>
+            {snap.snapLoading ? 'Syncing…' : '✓ Done — sync my accounts'}
+          </button>
+        </div>
       </section>
     </div>
   )
@@ -1513,7 +1454,17 @@ export default function Finance() {
     />
   )
   if (view === 'investments') return (
-    <InvestmentsDetail summary={data.summary} snap={snap} onBack={() => setView('dashboard')} />
+    <InvestmentsDetail
+      summary={data.summary}
+      snap={snap}
+      transactions={data.transactions}
+      month={data.month}
+      setMonth={data.setMonth}
+      onReload={data.load}
+      onCategoryChange={data.updateAccountCategory}
+      onTxCategoryChange={data.updateTransactionCategory}
+      onBack={() => setView('dashboard')}
+    />
   )
   if (view === 'spending') return (
     <SpendingDetail
@@ -1548,8 +1499,7 @@ export default function Finance() {
   // ── Dashboard ──
   const sp = data.summary?.spending
   const netWorth = (data.summary?.cash?.total || 0) +
-    (data.summary?.investments?.total || 0) +
-    snap.snapTotal -
+    (data.summary?.investments?.total || 0) -
     (data.summary?.credit?.total || 0)
 
   return (
@@ -1618,11 +1568,11 @@ export default function Finance() {
               <span className="fin-sr-icon">📈</span>
               <div className="fin-sr-info">
                 <span className="fin-sr-label">Investments</span>
-                <span className="fin-sr-sub">{snap.snapLinked ? 'Vanguard + TSP' : `${data.summary?.investments?.accounts?.length || 0} accounts`}</span>
+                <span className="fin-sr-sub">{`${data.summary?.investments?.accounts?.length || 0} accounts`}</span>
               </div>
             </div>
             <div className="fin-sr-right">
-              <span className="fin-sr-value fin-sr-value--green">{fmtUSD((data.summary?.investments?.total || 0) + snap.snapTotal)}</span>
+              <span className="fin-sr-value fin-sr-value--green">{fmtUSD(data.summary?.investments?.total || 0)}</span>
               <span className="fin-sr-arrow">›</span>
             </div>
           </button>

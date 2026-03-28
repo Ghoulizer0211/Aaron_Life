@@ -828,18 +828,69 @@ const snapClient = new Snaptrade({
 })
 
 function getSnaptradeUser() {
-  const userId     = process.env.SNAPTRADE_USER_ID
-  const userSecret = process.env.SNAPTRADE_USER_SECRET
-  if (!userId || !userSecret) throw new Error('SNAPTRADE_USER_ID / SNAPTRADE_USER_SECRET not set in .env')
+  const tokens     = readTokens()
+  const userId     = tokens.snap_user_id     || process.env.SNAPTRADE_USER_ID
+  const userSecret = tokens.snap_user_secret || process.env.SNAPTRADE_USER_SECRET
+  if (!userId || !userSecret) throw new Error('SnapTrade user not registered. POST /api/snaptrade/register first.')
   return { userId, userSecret }
 }
 
-app.get('/api/snaptrade/status', (req, res) => {
-  res.json({ linked: !!(process.env.SNAPTRADE_USER_ID && process.env.SNAPTRADE_USER_SECRET) })
+// Register a SnapTrade user (one-time setup). Idempotent — safe to call again.
+app.post('/api/snaptrade/register', async (req, res) => {
+  try {
+    const tokens = readTokens()
+    if (tokens.snap_user_id && tokens.snap_user_secret) {
+      return res.json({ registered: true, userId: tokens.snap_user_id })
+    }
+    // Also check legacy env vars
+    if (process.env.SNAPTRADE_USER_ID && process.env.SNAPTRADE_USER_SECRET) {
+      saveTokens({ ...tokens, snap_user_id: process.env.SNAPTRADE_USER_ID, snap_user_secret: process.env.SNAPTRADE_USER_SECRET })
+      return res.json({ registered: true, userId: process.env.SNAPTRADE_USER_ID })
+    }
+    const userId = `aaron_${Date.now()}`
+    const response = await snapClient.authentication.registerSnapTradeUser({ userId })
+    const userSecret = response.data?.userSecret
+    if (!userSecret) throw new Error('No userSecret returned from SnapTrade')
+    saveTokens({ ...tokens, snap_user_id: userId, snap_user_secret: userSecret })
+    console.log('[snaptrade] registered user:', userId)
+    res.json({ registered: true, userId })
+  } catch (err) {
+    console.error('snaptrade/register error:', err.message)
+    res.status(500).json({ error: err.message })
+  }
 })
 
+// Status — returns whether user is registered and how many accounts are connected
+app.get('/api/snaptrade/status', async (req, res) => {
+  try {
+    const tokens   = readTokens()
+    const userId   = tokens.snap_user_id || process.env.SNAPTRADE_USER_ID
+    const uSecret  = tokens.snap_user_secret || process.env.SNAPTRADE_USER_SECRET
+    const registered = !!(userId && uSecret)
+    if (!registered || !supabase) return res.json({ registered, accountCount: 0 })
+    const { data } = await supabase.from('bank_accounts').select('account_id').eq('source', 'snaptrade')
+    res.json({ registered, accountCount: (data || []).length })
+  } catch (err) {
+    res.json({ registered: false, accountCount: 0 })
+  }
+})
+
+// Get connection portal URL — registers user automatically if needed
 app.post('/api/snaptrade/connect', async (req, res) => {
   try {
+    // Auto-register if not yet set up
+    const tokens = readTokens()
+    if (!tokens.snap_user_id) {
+      if (process.env.SNAPTRADE_USER_ID && process.env.SNAPTRADE_USER_SECRET) {
+        saveTokens({ ...tokens, snap_user_id: process.env.SNAPTRADE_USER_ID, snap_user_secret: process.env.SNAPTRADE_USER_SECRET })
+      } else {
+        const userId  = `aaron_${Date.now()}`
+        const regRes  = await snapClient.authentication.registerSnapTradeUser({ userId })
+        const uSecret = regRes.data?.userSecret
+        if (!uSecret) throw new Error('Failed to register SnapTrade user')
+        saveTokens({ ...tokens, snap_user_id: userId, snap_user_secret: uSecret })
+      }
+    }
     const { userId, userSecret } = getSnaptradeUser()
     const { customRedirect } = req.body || {}
     const response = await snapClient.authentication.loginSnapTradeUser({
@@ -858,6 +909,53 @@ app.post('/api/snaptrade/connect', async (req, res) => {
   }
 })
 
+// Sync SnapTrade accounts → upsert into bank_accounts table (same as Teller)
+// Uses getAllUserHoldings which returns accounts + balances + positions in one call
+app.post('/api/snaptrade/sync', async (req, res) => {
+  try {
+    const { userId, userSecret } = getSnaptradeUser()
+    if (!supabase) return res.status(500).json({ error: 'Supabase not configured' })
+
+    const holdingsRes = await snapClient.accountInformation.getAllUserHoldings({ userId, userSecret })
+    const holdings = holdingsRes.data || []
+
+    const upserts = []
+    for (const h of holdings) {
+      const acct    = h.account  || {}
+      const balance = h.balances?.[0]?.total ?? h.balances?.[0]?.cash ?? 0
+
+      upserts.push({
+        account_id:        `snap_${acct.id}`,
+        enrollment_id:     null,
+        account_name:      acct.name || 'Investment Account',
+        type:              'investment',
+        subtype:           acct.account_type?.name || 'brokerage',
+        category_group:    'investments',
+        current_balance:   balance,
+        available_balance: balance,
+        last_four:         acct.number ? String(acct.number).slice(-4) : null,
+        institution_name:  acct.institution_name || null,
+        last_synced_at:    new Date().toISOString(),
+        source:            'snaptrade',
+        snap_account_id:   acct.id,
+      })
+    }
+
+    if (upserts.length > 0) {
+      const { error } = await supabase.from('bank_accounts').upsert(upserts, { onConflict: 'account_id' })
+      if (error) throw error
+    }
+
+    bustCache('finance_summary')
+    console.log(`[snaptrade] synced ${upserts.length} accounts`)
+    res.json({ synced: upserts.length, accounts: upserts.map(a => ({ id: a.account_id, name: a.account_name, balance: a.current_balance })) })
+  } catch (err) {
+    console.error('snaptrade/sync error:', err.message)
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// Holdings (positions) for display — not stored, fetched live
 app.get('/api/snaptrade/holdings', async (req, res) => {
   try {
     const { userId, userSecret } = getSnaptradeUser()
@@ -869,13 +967,28 @@ app.get('/api/snaptrade/holdings', async (req, res) => {
   }
 })
 
+// Disconnect — remove all SnapTrade accounts from bank_accounts
 app.delete('/api/snaptrade/disconnect', async (req, res) => {
-  res.json({ success: true })
+  try {
+    if (supabase) {
+      const { error } = await supabase.from('bank_accounts').delete().eq('source', 'snaptrade')
+      if (error) throw error
+      bustCache('finance_summary')
+    }
+    res.json({ success: true })
+  } catch (err) {
+    console.error('snaptrade/disconnect error:', err.message)
+    res.status(500).json({ error: err.message })
+  }
 })
 
 // ─── Oura Ring ────────────────────────────────────────────────────────────────
 
 const OURA_BASE = 'https://api.ouraring.com'
+
+function getOuraToken() {
+  return readTokens().oura_token || process.env.VITE_OURA_ACCESS_TOKEN || null
+}
 
 async function ouraFetch(path, token) {
   const res = await fetch(`${OURA_BASE}${path}`, {
@@ -896,6 +1009,10 @@ app.post('/api/oura/connect', async (req, res) => {
   try {
     await ouraFetch('/v2/usercollection/personal_info', token.trim())
     saveTokens({ ...readTokens(), oura_token: token.trim() })
+    // Persist to Supabase so token survives server restarts
+    if (supabase) {
+      await supabase.from('settings').upsert({ key: 'oura_token', value: token.trim() })
+    }
     res.json({ success: true })
   } catch {
     res.status(401).json({ error: 'Invalid token — double-check your Personal Access Token' })
@@ -903,29 +1020,32 @@ app.post('/api/oura/connect', async (req, res) => {
 })
 
 app.get('/api/oura/status', (req, res) => {
-  res.json({ linked: !!readTokens().oura_token })
+  res.json({ linked: !!getOuraToken() })
 })
 
-app.delete('/api/oura/disconnect', (req, res) => {
+app.delete('/api/oura/disconnect', async (req, res) => {
   const tokens = readTokens()
   delete tokens.oura_token
   saveTokens(tokens)
+  if (supabase) {
+    await supabase.from('settings').delete().eq('key', 'oura_token')
+  }
   res.json({ success: true })
 })
 
 app.get('/api/oura/today', async (req, res) => {
-  const { oura_token } = readTokens()
-  if (!oura_token) return res.status(404).json({ error: 'Not connected' })
+  const token = getOuraToken()
+  if (!token) return res.status(404).json({ error: 'Not connected' })
 
   const today     = req.query.date || new Date().toISOString().slice(0, 10)
   const yesterday = new Date(new Date(today + 'T12:00:00').getTime() - 86400000).toISOString().slice(0, 10)
 
   try {
     const [readinessR, dailySleepR, sleepR, activityR] = await Promise.allSettled([
-      ouraFetch(`/v2/usercollection/daily_readiness?start_date=${yesterday}&end_date=${today}`, oura_token),
-      ouraFetch(`/v2/usercollection/daily_sleep?start_date=${yesterday}&end_date=${today}`, oura_token),
-      ouraFetch(`/v2/usercollection/sleep?start_date=${yesterday}&end_date=${today}`, oura_token),
-      ouraFetch(`/v2/usercollection/daily_activity?start_date=${today}&end_date=${today}`, oura_token),
+      ouraFetch(`/v2/usercollection/daily_readiness?start_date=${yesterday}&end_date=${today}`, token),
+      ouraFetch(`/v2/usercollection/daily_sleep?start_date=${yesterday}&end_date=${today}`, token),
+      ouraFetch(`/v2/usercollection/sleep?start_date=${yesterday}&end_date=${today}`, token),
+      ouraFetch(`/v2/usercollection/daily_activity?start_date=${today}&end_date=${today}`, token),
     ])
 
     const readiness     = readinessR.status  === 'fulfilled' ? readinessR.value.data?.slice(-1)[0]  : null
@@ -936,35 +1056,134 @@ app.get('/api/oura/today', async (req, res) => {
     const mainSleep = sleepSessions.find(s => s.type === 'long_sleep')
       || sleepSessions[sleepSessions.length - 1] || null
 
+    // Check if gym workout logged today
+    let workout_today = false
+    if (supabase) {
+      const { data: gw } = await supabase.from('gym_workouts').select('id').eq('date', today).neq('type', 'Rest').limit(1)
+      workout_today = (gw || []).length > 0
+    }
+
+    const fmtTime = (iso) => {
+      if (!iso) return null
+      const d = new Date(iso)
+      return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })
+    }
+
     res.json({
+      date: today,
+      workout_today,
       readiness: readiness ? {
-        score: readiness.score,
+        score:                 readiness.score,
         temperature_deviation: readiness.temperature_deviation,
-        contributors: readiness.contributors,
+        contributors:          readiness.contributors,
       } : null,
-      sleep: {
+      sleep: mainSleep || dailySleep ? {
         score:       dailySleep?.score       ?? null,
         contributors: dailySleep?.contributors ?? null,
         total_hours: mainSleep ? secToHrs(mainSleep.total_sleep_duration)  : null,
         deep_hours:  mainSleep ? secToHrs(mainSleep.deep_sleep_duration)   : null,
         rem_hours:   mainSleep ? secToHrs(mainSleep.rem_sleep_duration)    : null,
         light_hours: mainSleep ? secToHrs(mainSleep.light_sleep_duration)  : null,
+        awake_hours: mainSleep ? secToHrs(mainSleep.awake_time ?? 0)       : null,
         efficiency:  mainSleep?.efficiency        ?? null,
         resting_hr:  mainSleep?.lowest_heart_rate ?? null,
         avg_hrv:     mainSleep?.average_hrv       ?? null,
-      },
+        bedtime:     fmtTime(mainSleep?.bedtime_start),
+        wake_time:   fmtTime(mainSleep?.bedtime_end),
+      } : null,
       activity: activity ? {
-        score:           activity.score,
-        steps:           activity.steps,
-        active_calories: activity.active_calories,
-        total_calories:  activity.total_calories,
-        target_calories: activity.target_calories,
+        score:            activity.score,
+        steps:            activity.steps,
+        active_calories:  activity.active_calories,
+        total_calories:   activity.total_calories,
+        target_calories:  activity.target_calories,
+        walking_miles:    activity.walking_equivalent_meters
+                            ? Math.round((activity.walking_equivalent_meters / 1609.34) * 10) / 10
+                            : null,
+        high_minutes:   activity.high    ?? null,
+        medium_minutes: activity.medium  ?? null,
+        low_minutes:    activity.low     ?? null,
+        non_wear:       activity.non_wear ?? null,
       } : null,
     })
   } catch (err) {
     console.error('Oura today error:', err.message)
     res.status(500).json({ error: err.message })
   }
+})
+
+// 7-30 day history for trends/sleep charts
+app.get('/api/oura/week', async (req, res) => {
+  const token = getOuraToken()
+  if (!token) return res.status(404).json({ error: 'Not connected' })
+
+  const days  = Math.min(parseInt(req.query.days) || 30, 90)
+  const end   = new Date().toISOString().slice(0, 10)
+  const start = new Date(Date.now() - (days + 1) * 86400000).toISOString().slice(0, 10)
+
+  try {
+    const [readinessR, sleepR, activityR, sleepSessionsR] = await Promise.allSettled([
+      ouraFetch(`/v2/usercollection/daily_readiness?start_date=${start}&end_date=${end}`, token),
+      ouraFetch(`/v2/usercollection/daily_sleep?start_date=${start}&end_date=${end}`, token),
+      ouraFetch(`/v2/usercollection/daily_activity?start_date=${start}&end_date=${end}`, token),
+      ouraFetch(`/v2/usercollection/sleep?start_date=${start}&end_date=${end}`, token),
+    ])
+
+    const byDate = {}
+    const ensure = d => { if (!byDate[d]) byDate[d] = { date: d } }
+
+    if (readinessR.status === 'fulfilled')
+      for (const r of readinessR.value.data || []) { ensure(r.day); byDate[r.day].readiness_score = r.score }
+
+    if (sleepR.status === 'fulfilled')
+      for (const s of sleepR.value.data || []) { ensure(s.day); byDate[s.day].sleep_score = s.score }
+
+    if (activityR.status === 'fulfilled')
+      for (const a of activityR.value.data || []) {
+        ensure(a.day)
+        byDate[a.day].activity_score = a.score
+        byDate[a.day].steps = a.steps
+      }
+
+    if (sleepSessionsR.status === 'fulfilled')
+      for (const s of (sleepSessionsR.value.data || []).filter(s => s.type === 'long_sleep')) {
+        ensure(s.day)
+        byDate[s.day].sleep_hours = secToHrs(s.total_sleep_duration)
+      }
+
+    res.json(Object.values(byDate).sort((a, b) => a.date.localeCompare(b.date)))
+  } catch (err) {
+    console.error('Oura week error:', err.message)
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// ─── Gym Workouts ─────────────────────────────────────────────────────────────
+
+app.get('/api/gym/workouts', async (req, res) => {
+  if (!supabase) return res.json([])
+  const limit = Math.min(parseInt(req.query.limit) || 60, 200)
+  const { data, error } = await supabase.from('gym_workouts').select('*').order('date', { ascending: false }).limit(limit)
+  if (error) return res.status(500).json({ error: error.message })
+  res.json(data || [])
+})
+
+app.post('/api/gym/workouts', async (req, res) => {
+  if (!supabase) return res.status(500).json({ error: 'Supabase not configured' })
+  const { date, type, duration_minutes, intensity, notes, exercises } = req.body
+  if (!date || !type) return res.status(400).json({ error: 'date and type required' })
+  const { data, error } = await supabase.from('gym_workouts')
+    .insert({ date, type, duration_minutes: duration_minutes || null, intensity, notes: notes || null, exercises: exercises || [] })
+    .select().single()
+  if (error) return res.status(500).json({ error: error.message })
+  res.json(data)
+})
+
+app.delete('/api/gym/workouts/:id', async (req, res) => {
+  if (!supabase) return res.status(500).json({ error: 'Supabase not configured' })
+  const { error } = await supabase.from('gym_workouts').delete().eq('id', req.params.id)
+  if (error) return res.status(500).json({ error: error.message })
+  res.json({ success: true })
 })
 
 // ─── Security (PIN + Biometric) ───────────────────────────────────────────────
@@ -1036,5 +1255,31 @@ app.delete('/api/events/:id', (req, res) => {
 
 // ─── Start ────────────────────────────────────────────────────────────────────
 
+// On startup, restore any tokens saved in Supabase so they survive server restarts
+async function restoreTokensFromSupabase() {
+  if (!supabase) return
+  try {
+    const { data } = await supabase.from('settings').select('key, value').in('key', ['oura_token'])
+    if (!data?.length) return
+    const tokens = readTokens()
+    let changed = false
+    for (const row of data) {
+      if (row.value && !tokens[row.key]) {
+        tokens[row.key] = row.value
+        changed = true
+      }
+    }
+    if (changed) {
+      saveTokens(tokens)
+      console.log('[startup] Restored tokens from Supabase:', data.map(r => r.key).join(', '))
+    }
+  } catch (e) {
+    console.error('[startup] Failed to restore tokens from Supabase:', e.message)
+  }
+}
+
 const PORT = process.env.PORT || 3001
-app.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`))
+app.listen(PORT, async () => {
+  console.log(`Server running on http://localhost:${PORT}`)
+  await restoreTokensFromSupabase()
+})
