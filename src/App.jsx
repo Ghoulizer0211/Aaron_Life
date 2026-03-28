@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import Header from './components/Header'
 import BottomNav from './components/BottomNav'
 import Schedule from './pages/Schedule'
@@ -66,6 +66,31 @@ export default function App() {
         .finally(() => clearTimeout(timeout))
     }
   }, []) // eslint-disable-line
+
+  // ── Inactivity timeout — lock after 15 min ──────────────────────────────────
+  const TIMEOUT_MS = 15 * 60 * 1000
+  const timerRef = useRef(null)
+
+  const resetTimer = useCallback(() => {
+    if (!window.isSecureContext) return
+    const hasPin = !!localStorage.getItem('aaron_security_pin_hash')
+    if (!hasPin) return
+    clearTimeout(timerRef.current)
+    timerRef.current = setTimeout(() => {
+      sessionStorage.removeItem('aaron_unlocked')
+      setLocked(true)
+    }, TIMEOUT_MS)
+  }, []) // eslint-disable-line
+
+  useEffect(() => {
+    const events = ['click', 'touchstart', 'keydown', 'scroll', 'mousemove']
+    events.forEach(e => window.addEventListener(e, resetTimer, { passive: true }))
+    resetTimer()
+    return () => {
+      events.forEach(e => window.removeEventListener(e, resetTimer))
+      clearTimeout(timerRef.current)
+    }
+  }, [resetTimer])
 
   const renderPage = () => {
     switch (activeTab) {

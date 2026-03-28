@@ -45,16 +45,48 @@ function nextMonthStart(month) {
     : `${y}-${String(m + 1).padStart(2, '0')}-01`
 }
 
-// ─── Token storage ────────────────────────────────────────────────────────────
+// ─── Token storage (AES-256-GCM encrypted) ────────────────────────────────────
+// Set TOKENS_ENCRYPTION_KEY env var to a 64-char hex string (32 bytes).
+// Generate one with: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+// If no key is set, tokens are stored plaintext with a warning.
+
+const ENC_KEY_HEX = process.env.TOKENS_ENCRYPTION_KEY
+const ENC_KEY     = ENC_KEY_HEX?.length === 64 ? Buffer.from(ENC_KEY_HEX, 'hex') : null
+if (!ENC_KEY) console.warn('[security] TOKENS_ENCRYPTION_KEY not set — tokens stored plaintext')
+
+function encryptTokens(obj) {
+  if (!ENC_KEY) return JSON.stringify(obj, null, 2)
+  const iv         = crypto.randomBytes(12)
+  const cipher     = crypto.createCipheriv('aes-256-gcm', ENC_KEY, iv)
+  const plain      = JSON.stringify(obj)
+  const encrypted  = Buffer.concat([cipher.update(plain, 'utf8'), cipher.final()])
+  const authTag    = cipher.getAuthTag()
+  return JSON.stringify({
+    enc: 1,
+    iv:  iv.toString('hex'),
+    tag: authTag.toString('hex'),
+    ct:  encrypted.toString('hex'),
+  })
+}
+
+function decryptTokens(raw) {
+  const parsed = JSON.parse(raw)
+  if (!parsed.enc) return parsed          // plaintext legacy file
+  if (!ENC_KEY) throw new Error('TOKENS_ENCRYPTION_KEY required to decrypt tokens')
+  const decipher = crypto.createDecipheriv('aes-256-gcm', ENC_KEY, Buffer.from(parsed.iv, 'hex'))
+  decipher.setAuthTag(Buffer.from(parsed.tag, 'hex'))
+  const plain = decipher.update(Buffer.from(parsed.ct, 'hex')) + decipher.final('utf8')
+  return JSON.parse(plain)
+}
 
 function readTokens() {
   if (!existsSync(TOKENS_FILE)) return {}
-  try { return JSON.parse(readFileSync(TOKENS_FILE, 'utf8')) }
+  try { return decryptTokens(readFileSync(TOKENS_FILE, 'utf8')) }
   catch { return {} }
 }
 
 function saveTokens(data) {
-  writeFileSync(TOKENS_FILE, JSON.stringify(data, null, 2))
+  writeFileSync(TOKENS_FILE, encryptTokens(data))
 }
 
 // ─── Teller ───────────────────────────────────────────────────────────────────
@@ -167,7 +199,10 @@ function mapTellerCategory(cat) {
     case 'software':
     case 'subscription':
     case 'streaming':
-    case 'insurance':    return 'bills'
+    case 'insurance':
+    case 'interest':
+    case 'fee':
+    case 'service':      return 'bills'
     // Transport — gas, parking, rideshare, public transit
     case 'transportation':
     case 'transport':
@@ -329,20 +364,24 @@ async function fetchAllTellerData(preFetchedAccounts = {}) {
           // is consistent: negative = spending, positive = income/payment.
           const isCreditCard = acc.type === 'credit' || acc.subtype === 'credit_card'
 
-          const txObjs = filteredTx.map(tx => ({
-            id:             tx.id,
-            transaction_id: tx.id,
-            name:           tx.description,
-            description:    tx.description,
-            amount:         isCreditCard ? -parseFloat(tx.amount) : parseFloat(tx.amount),
-            category:       mapTellerCategory(tx.details?.category),
-            date:           tx.date,
-            accountId:      tx.account_id,
-            account_id:     tx.account_id,
-            enrollmentId:   enrollment.enrollmentId,
-            pending:        tx.status === 'pending',
-            is_transfer:    tx.details?.category?.toLowerCase().includes('transfer') || false,
-          }))
+          const txObjs = filteredTx.map(tx => {
+            // Prefer Teller's counterparty name (clean merchant name) over raw bank description
+            const displayName = tx.details?.counterparty?.name || tx.description
+            return {
+              id:             tx.id,
+              transaction_id: tx.id,
+              name:           displayName,
+              description:    displayName,
+              amount:         isCreditCard ? -parseFloat(tx.amount) : parseFloat(tx.amount),
+              category:       mapTellerCategory(tx.details?.category),
+              date:           tx.date,
+              accountId:      tx.account_id,
+              account_id:     tx.account_id,
+              enrollmentId:   enrollment.enrollmentId,
+              pending:        tx.status === 'pending',
+              is_transfer:    tx.details?.category?.toLowerCase().includes('transfer') || false,
+            }
+          })
           allTransactions.push(...txObjs)
 
           if (supabase && txObjs.length > 0) {

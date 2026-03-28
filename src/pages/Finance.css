@@ -265,6 +265,10 @@
 .acc-name {
   font-size: 18px;
   color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 200px;
 }
 
 .acc-mask {
@@ -316,7 +320,7 @@
 }
 
 .tx-name {
-  font-size: 18px;
+  font-size: 15px;
   color: var(--text-primary);
   white-space: nowrap;
   overflow: hidden;
@@ -577,35 +581,154 @@
   font-family: inherit;
 }
 
-/* ── Summary cards grid ──────────────────────────────────────────────────────── */
-.fin-cards-grid {
+/* ── Net Worth Hero ───────────────────────────────────────────────────────────── */
+.fin-nw-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 28px 20px 24px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  text-align: center;
+}
+.fin-nw-hero-label {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  color: #ffffff;
+  font-family: 'Orbitron', sans-serif;
+}
+.fin-nw-hero-value {
+  font-size: 34px;
+  font-weight: 700;
+  color: var(--accent);
+  font-family: 'Orbitron', sans-serif;
+  text-shadow: 0 0 20px rgba(0, 229, 255, 0.3);
+  letter-spacing: -1px;
+}
+.fin-nw-hero-sub {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+/* ── Summary rows ─────────────────────────────────────────────────────────────── */
+.fin-summary-list {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  padding: 0 4px;
 }
-.fin-summary-card {
+.fin-summary-row {
   display: flex;
   align-items: center;
-  gap: 14px;
-  padding: 16px;
-  background: var(--bg-card);
+  justify-content: space-between;
+  padding: 18px 16px;
   border: 1px solid var(--border);
-  border-left: 3px solid var(--card-accent, var(--accent));
+  border-left: 4px solid var(--row-accent, var(--border));
   border-radius: 12px;
+  background: var(--bg-card);
   width: 100%;
   text-align: left;
   cursor: pointer;
-  transition: background 0.15s;
+  transition: background 0.12s;
   -webkit-tap-highlight-color: transparent;
+  gap: 12px;
 }
-.fin-summary-card:active { background: var(--bg-card-hover); }
-.fin-card-icon { font-size: 22px; flex-shrink: 0; }
-.fin-card-body { flex: 1; display: flex; flex-direction: column; gap: 2px; }
-.fin-card-label { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-muted); }
-.fin-card-value { font-size: 20px; font-weight: 700; color: var(--text-primary); font-family: 'Orbitron', sans-serif; }
-.fin-card-sub   { font-size: 11px; color: var(--text-muted); }
-.fin-card-arrow { font-size: 20px; color: var(--text-muted); flex-shrink: 0; }
+.fin-summary-row:active { background: var(--bg-card-hover); }
+.fin-summary-row--blue  { --row-accent: #00aaff; }
+.fin-summary-row--red   { --row-accent: #ff1a1a; }
+.fin-summary-row--green { --row-accent: #00ff9d; }
+.fin-summary-row--pink  { --row-accent: #ff2d78; }
+
+.fin-sr-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+  min-width: 0;
+}
+.fin-sr-icon { font-size: 22px; flex-shrink: 0; }
+.fin-sr-info { display: flex; flex-direction: column; gap: 2px; }
+.fin-sr-label {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.fin-sr-sub {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.fin-sr-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.fin-sr-value {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-primary);
+  font-family: 'Orbitron', sans-serif;
+}
+.fin-sr-value--red   { color: var(--red); }
+.fin-sr-value--green { color: var(--green); }
+.fin-sr-arrow {
+  font-size: 20px;
+  color: var(--text-muted);
+}
+
+/* ── Accordion accounts ──────────────────────────────────────────────────────── */
+.fin-accordion-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.fin-accordion {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.fin-accordion-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 14px 16px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  gap: 12px;
+}
+.fin-accordion-header:active { background: var(--bg-card-hover); }
+.fin-accordion-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+.fin-accordion-chevron {
+  font-size: 18px;
+  color: var(--text-muted);
+  width: 16px;
+  text-align: center;
+}
+.fin-accordion-body {
+  border-top: 1px solid var(--border);
+  background: transparent;
+}
+.fin-accordion-body .tx-row {
+  border-radius: 0;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  padding-left: 28px;
+}
+.fin-accordion-body .tx-row:last-child {
+  border-bottom: none;
+}
 
 /* ── Detail header ───────────────────────────────────────────────────────────── */
 .fin-detail-header {
@@ -931,6 +1054,122 @@
   flex-shrink: 0;
 }
 
+/* ── Recurring / Subscriptions ───────────────────────────────────────────────── */
+.fin-sub-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  gap: 12px;
+}
+.fin-sub-row:last-of-type { border-bottom: none; }
+.fin-sub-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+}
+.fin-sub-icon { font-size: 18px; flex-shrink: 0; }
+.fin-sub-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.fin-sub-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.fin-sub-meta {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: capitalize;
+}
+.fin-sub-badge-inactive { color: var(--amber); }
+.fin-sub-right {
+  display: flex;
+  align-items: baseline;
+  gap: 2px;
+  flex-shrink: 0;
+}
+.fin-sub-amt {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--red);
+}
+.fin-sub-amt--inactive { color: var(--text-muted); }
+.fin-sub-freq {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.fin-sub-total-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 10px 16px;
+  border-top: 1px solid var(--border);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+.fin-sub-remove {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 0 0 8px;
+  flex-shrink: 0;
+}
+.fin-sub-remove:hover { color: var(--red); }
+
+/* Pending subscription review rows */
+.fin-sub-review-section-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  padding: 12px 16px 6px;
+}
+.fin-sub-review-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  gap: 12px;
+}
+.fin-sub-review-row:last-of-type { border-bottom: none; }
+.fin-sub-review-btns {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.fin-sub-btn-yes,
+.fin-sub-btn-no {
+  border: none;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: inherit;
+  padding: 5px 14px;
+  cursor: pointer;
+}
+.fin-sub-btn-yes {
+  background: rgba(52, 199, 89, 0.15);
+  color: var(--green);
+  border: 1px solid rgba(52, 199, 89, 0.3);
+}
+.fin-sub-btn-yes:hover { background: rgba(52, 199, 89, 0.25); }
+.fin-sub-btn-no {
+  background: rgba(255, 59, 48, 0.1);
+  color: var(--red);
+  border: 1px solid rgba(255, 59, 48, 0.25);
+}
+.fin-sub-btn-no:hover { background: rgba(255, 59, 48, 0.2); }
+
 /* ── Top Merchants ───────────────────────────────────────────────────────────── */
 .fin-merchant-row {
   display: flex;
@@ -979,6 +1218,65 @@
   color: var(--text-primary);
   font-variant-numeric: tabular-nums;
   flex-shrink: 0;
+}
+
+/* ── Account label on TxRow ──────────────────────────────────────────────────── */
+.tx-account-label {
+  color: var(--accent);
+  font-size: 11px;
+  opacity: 0.8;
+}
+
+/* ── Transaction filter tabs ─────────────────────────────────────────────────── */
+.fin-tx-tabs {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  scrollbar-width: none;
+}
+.fin-tx-tabs::-webkit-scrollbar { display: none; }
+
+.fin-tx-tab {
+  flex-shrink: 0;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 5px 12px;
+  border-radius: 20px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+.fin-tx-tab.active {
+  background: var(--accent-dim);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* ── Tx summary row (count + net) ────────────────────────────────────────────── */
+.fin-tx-summary-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 2px;
+}
+.fin-tx-summary-count { font-size: 12px; color: var(--text-muted); }
+.fin-tx-summary-net   { font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* ── Date group headers ──────────────────────────────────────────────────────── */
+.fin-tx-date-group { margin-bottom: 16px; }
+.fin-tx-date-group:last-child { margin-bottom: 0; }
+
+.fin-tx-date-header {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  padding: 0 4px 6px;
 }
 
 /* ── Misc ─────────────────────────────────────────────────────────────────────── */

@@ -24,7 +24,7 @@
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
-  padding-bottom: calc(var(--nav-height) + env(safe-area-inset-bottom, 0px) + 8px);
+  padding-bottom: calc(42px + env(safe-area-inset-bottom));
   -webkit-overflow-scrolling: touch;
   min-height: 0;
 }

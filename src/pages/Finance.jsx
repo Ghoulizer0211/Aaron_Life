@@ -371,6 +371,82 @@ function useFinanceData() {
   }
 }
 
+// ── Subscription detection ────────────────────────────────────────────────────
+
+function useSubscriptions() {
+  const [subs, setSubs] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('aaron_finance_subs') || '[]') }
+    catch { return [] }
+  })
+
+  useEffect(() => {
+    async function load() {
+      try {
+        // Fetch last 4 months of transactions
+        const months = []
+        for (let i = 0; i < 4; i++) {
+          const d = new Date()
+          d.setMonth(d.getMonth() - i)
+          months.push(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`)
+        }
+        const results = await Promise.all(
+          months.map(m => fetch(`/api/finance/transactions?month=${m}&limit=500`).then(r => r.ok ? r.json() : []))
+        )
+        const allTx = results.flat()
+        const detected = detectSubscriptions(allTx)
+        setSubs(detected)
+        localStorage.setItem('aaron_finance_subs', JSON.stringify(detected))
+      } catch { /* ignore */ }
+    }
+    load()
+  }, [])
+
+  return subs
+}
+
+function detectSubscriptions(allTx) {
+  const EXCLUDE = new Set(['transfer', 'investing', 'income'])
+  const charges = allTx.filter(t =>
+    parseFloat(t.amount) < 0 && !EXCLUDE.has(t.category) && !t.is_transfer
+  )
+
+  const byMerchant = {}
+  for (const tx of charges) {
+    const key = normalizeMerchant(tx.description || tx.name)
+    if (!key || key === 'Unknown') continue
+    if (!byMerchant[key]) byMerchant[key] = []
+    byMerchant[key].push(tx)
+  }
+
+  const subs = []
+  for (const [merchant, txs] of Object.entries(byMerchant)) {
+    const months = new Set(txs.map(t => t.date?.slice(0, 7)))
+    if (months.size < 2) continue
+
+    const amounts = txs.map(t => Math.abs(parseFloat(t.amount)))
+    const avgAmt  = amounts.reduce((s, a) => s + a, 0) / amounts.length
+    // Amounts must be within 25% of each other
+    const consistent = amounts.every(a => avgAmt === 0 || Math.abs(a - avgAmt) / avgAmt < 0.25)
+    if (!consistent) continue
+
+    const sorted     = [...txs].sort((a, b) => (b.date || '').localeCompare(a.date || ''))
+    const lastCharged = sorted[0].date
+    const category   = sorted[0].category || 'other'
+    const monthsArr  = [...months].sort()
+    // Detect frequency
+    let frequency = 'monthly'
+    if (months.size >= 3 && txs.length / months.size >= 3.5) frequency = 'weekly'
+
+    // Flag if not charged this month (potentially cancelled or skipped)
+    const thisMonth = new Date().toISOString().slice(0, 7)
+    const chargedThisMonth = months.has(thisMonth)
+
+    subs.push({ merchant, amount: avgAmt, count: txs.length, months: months.size, lastCharged, category, frequency, chargedThisMonth, monthsArr })
+  }
+
+  return subs.sort((a, b) => b.amount - a.amount)
+}
+
 // ── Sub-components ────────────────────────────────────────────────────────────
 
 function SummaryCard({ label, value, sub, accent, onClick, icon }) {
@@ -428,7 +504,7 @@ function AccountRow({ account, onCategoryChange }) {
   )
 }
 
-function TxRow({ tx, onCategoryChange }) {
+function TxRow({ tx, onCategoryChange, accountLabel }) {
   const [expanded,  setExpanded]  = useState(false)
   const [saving,    setSaving]    = useState(false)
   const [saveState, setSaveState] = useState(null)   // null | 'ok' | 'err'
@@ -482,6 +558,7 @@ function TxRow({ tx, onCategoryChange }) {
           <span className="tx-name">{tx.description || tx.name}</span>
           {tx.note && <span className="tx-note-display">{tx.note}</span>}
           <span className="tx-date">
+            {accountLabel && <span className="tx-account-label">{accountLabel} · </span>}
             {formatDate(tx.date)}
             <span className="tx-cat-tag" style={{ color: cat.color }}> · {cat.icon} {cat.label}</span>
           </span>
@@ -550,10 +627,51 @@ function MonthSelector({ month, onChange }) {
 
 // ── Detail Views ──────────────────────────────────────────────────────────────
 
+function AccordionAccount({ account, transactions, onCategoryChange, onTxCategoryChange }) {
+  const [open, setOpen] = useState(false)
+  const isCredit = account.category_group === 'credit' || account.subtype === 'credit_card'
+  const bal = isCredit
+    ? (account.current_balance ?? account.balance ?? 0)
+    : (account.available_balance ?? account.current_balance ?? account.balance ?? 0)
+  const acctTx = [...transactions]
+    .filter(t => t.account_id === (account.account_id || account.id))
+    .sort((a, b) => (b.date || '').localeCompare(a.date || ''))
+
+  return (
+    <div className="fin-accordion">
+      <button className="fin-accordion-header" onClick={() => setOpen(o => !o)}>
+        <div className="acc-left">
+          <span className={`acc-icon ${account.type || 'bank'}`} />
+          <div className="acc-info">
+            <span className="acc-name">{account.account_name || account.name}</span>
+            <div className="acc-meta">
+              {account.last_four && <span className="acc-mask">•••• {account.last_four}</span>}
+            </div>
+          </div>
+        </div>
+        <div className="fin-accordion-right">
+          <span className="acc-balance" style={{ color: isCredit ? (bal < 0 ? 'var(--green)' : '#ff2d78') : 'var(--green)' }}>
+            {fmtUSD(bal)}
+          </span>
+          <span className="fin-accordion-chevron">{open ? '∨' : '›'}</span>
+        </div>
+      </button>
+      {open && (
+        <div className="fin-accordion-body">
+          {acctTx.length === 0
+            ? <div className="empty-state" style={{ padding: '12px 16px', fontSize: '13px' }}>No transactions this month</div>
+            : acctTx.map((tx, i) => (
+                <TxRow key={tx.transaction_id || tx.id || i} tx={tx} onCategoryChange={onTxCategoryChange} />
+              ))
+          }
+        </div>
+      )}
+    </div>
+  )
+}
+
 function CashDetail({ summary, transactions, month, setMonth, onCategoryChange, onTxCategoryChange, onBack }) {
   const accounts = summary?.cash?.accounts || []
-  const cashIds  = new Set(accounts.map(a => a.account_id || a.id))
-  const cashTx   = transactions.filter(t => cashIds.has(t.account_id))
 
   return (
     <div className="page">
@@ -571,32 +689,24 @@ function CashDetail({ summary, transactions, month, setMonth, onCategoryChange, 
       </section>
 
       <section className="page-section">
-        <h2 className="section-title">Accounts</h2>
-        <div className="card-list">
+        <div className="fin-accordion-list">
           {accounts.map((a, i) => (
-            <AccountRow key={a.account_id || i} account={a} onCategoryChange={onCategoryChange} />
+            <AccordionAccount
+              key={a.account_id || i}
+              account={a}
+              transactions={transactions}
+              onCategoryChange={onCategoryChange}
+              onTxCategoryChange={onTxCategoryChange}
+            />
           ))}
         </div>
       </section>
-
-      {cashTx.length > 0 && (
-        <section className="page-section">
-          <h2 className="section-title">Transactions — {monthLabel(month)}</h2>
-          <div className="card-list">
-            {[...cashTx].sort((a,b)=>(b.date||'').localeCompare(a.date||'')).map((tx, i) => (
-              <TxRow key={tx.transaction_id || tx.id || i} tx={tx} onCategoryChange={onTxCategoryChange} />
-            ))}
-          </div>
-        </section>
-      )}
     </div>
   )
 }
 
 function CreditDetail({ summary, transactions, month, setMonth, onCategoryChange, onTxCategoryChange, onBack }) {
-  const accounts  = summary?.credit?.accounts || []
-  const creditIds = new Set(accounts.map(a => a.account_id || a.id))
-  const creditTx  = transactions.filter(t => creditIds.has(t.account_id))
+  const accounts = summary?.credit?.accounts || []
 
   return (
     <div className="page">
@@ -609,29 +719,23 @@ function CreditDetail({ summary, transactions, month, setMonth, onCategoryChange
       <section className="page-section">
         <div className="card net-worth-card">
           <span className="nw-label">Total Owed</span>
-          <span className="nw-value" style={{ color: 'var(--negative, #ff2d78)' }}>{fmtUSD(summary?.credit?.total)}</span>
+          <span className="nw-value" style={{ color: '#ff2d78' }}>{fmtUSD(summary?.credit?.total)}</span>
         </div>
       </section>
 
       <section className="page-section">
-        <h2 className="section-title">Cards</h2>
-        <div className="card-list">
+        <div className="fin-accordion-list">
           {accounts.map((a, i) => (
-            <AccountRow key={a.account_id || i} account={a} onCategoryChange={onCategoryChange} />
+            <AccordionAccount
+              key={a.account_id || i}
+              account={a}
+              transactions={transactions}
+              onCategoryChange={onCategoryChange}
+              onTxCategoryChange={onTxCategoryChange}
+            />
           ))}
         </div>
       </section>
-
-      {creditTx.length > 0 && (
-        <section className="page-section">
-          <h2 className="section-title">Transactions — {monthLabel(month)}</h2>
-          <div className="card-list">
-            {[...creditTx].sort((a,b)=>(b.date||'').localeCompare(a.date||'')).map((tx, i) => (
-              <TxRow key={tx.transaction_id || tx.id || i} tx={tx} onCategoryChange={onTxCategoryChange} />
-            ))}
-          </div>
-        </section>
-      )}
     </div>
   )
 }
@@ -751,16 +855,84 @@ function InvestmentsDetail({ summary, snap, onBack }) {
   )
 }
 
-function normalizeMerchant(desc) {
-  return (desc || 'Unknown')
-    .replace(/\s+[*#].*/g, '')       // strip "AMZN MKTP US*A1B2C3" → "AMZN MKTP US"
-    .replace(/\s+\d{4,}$/g, '')      // strip trailing long numbers
-    .replace(/^(ACH|POS|TST\*)\s*/i, '') // strip common prefixes
-    .trim()
-    .slice(0, 30)
+function normalizeMerchant(raw) {
+  if (!raw) return 'Unknown'
+  let s = raw.trim()
+
+  // Extract merchant from ACH wire noise: "ORIG CO NAME:ACME CO ENTRY DESCR:..."
+  const ach = s.match(/ORIG CO NAME:\s*(.+?)(?:\s+CO\s+ENTRY|\s+SEC:|$)/i)
+  if (ach) s = ach[1].trim()
+
+  // Known merchant table — checked before any stripping
+  const up = s.toUpperCase()
+  const KNOWN = [
+    ['APPLECARD',          'Apple Card Payment'],
+    ['APPLE CARD',         'Apple Card Payment'],
+    ['CLAUDE.AI',          'Claude.ai'],
+    ['TESLA SUPERCHARGER', 'Tesla Supercharger'],
+    ['HLU*HULUPLUS',       'Hulu'],
+    ['HULUPLUS',           'Hulu'],
+    ['NETFLIX',            'Netflix'],
+    ['SPOTIFY',            'Spotify'],
+    ['AMZN MKTP',          'Amazon'],
+    ['AMAZON.COM',         'Amazon'],
+    ['AMAZON',             'Amazon'],
+    ['PAYPAL',             'PayPal'],
+    ['VENMO',              'Venmo'],
+    ['ZELLE',              'Zelle'],
+    ['TARGET',             'Target'],
+    ['WALMART',            'Walmart'],
+    ['COSTCO',             'Costco'],
+    ['STARBUCKS',          'Starbucks'],
+    ['CHEVRON',            'Chevron'],
+    ['GOOGLE',             'Google'],
+    ['TCR*MTA',            'Caltrain / MTA'],
+    ['APPLE.COM/BILL',     'Apple Subscriptions'],
+    ['DISCORD',            'Discord'],
+    ['CHATGPT',            'ChatGPT'],
+    ['OPENAI',             'OpenAI'],
+    ['YOUTUBE',            'YouTube'],
+    ['UBER EATS',          'Uber Eats'],
+    ['DOORDASH',           'DoorDash'],
+  ]
+  for (const [k, v] of KNOWN) {
+    if (up.includes(k.toUpperCase())) return v
+  }
+
+  // Strip card last-four suffix: " - 9849"
+  s = s.replace(/\s+-\s+\d{4}$/, '')
+  // Strip phone numbers: "877-7983752"
+  s = s.replace(/\s+\d{3}[-]\d{7,}/g, '')
+  // Strip state abbreviation at end: "SAN JOSE CA" → "SAN JOSE"
+  s = s.replace(/\s+[A-Z]{2}$/, '')
+  // Strip long trailing number sequences (store IDs)
+  s = s.replace(/\s+\d{5,}$/g, '')
+  // Strip common prefixes: "TST* ", "SQ *", "HLU*"
+  s = s.replace(/^[A-Z]{2,4}\*\s*/i, '')
+  // Strip asterisk garbage: "AMZN*A1B2C3" trailing ref
+  s = s.replace(/\*[A-Z0-9]+$/, '')
+
+  // Title-case only if string is fully uppercase
+  if (s === s.toUpperCase()) {
+    s = s.toLowerCase().replace(/\b\w/g, c => c.toUpperCase())
+  }
+
+  return s.trim().slice(0, 40) || 'Unknown'
 }
 
-function SpendingDetail({ summary, transactions, month, setMonth, onTxCategoryChange, onBack }) {
+function SpendingDetail({ summary, transactions, month, setMonth, onTxCategoryChange, subscriptions = [], onBack }) {
+  // ── Subscription review state ──────────────────────────────────────────────
+  const [subChoices, setSubChoices] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('aaron_sub_choices') || '{}') }
+    catch { return {} }
+  })
+  const saveChoice = (merchant, choice) => {
+    const next = { ...subChoices, [merchant]: choice }
+    setSubChoices(next)
+    localStorage.setItem('aaron_sub_choices', JSON.stringify(next))
+  }
+  const confirmedSubs = subscriptions.filter(s => subChoices[s.merchant] === 'yes')
+  const pendingSubs   = subscriptions.filter(s => !subChoices[s.merchant])
   const sp = summary?.spending
 
   // ── Date math ──────────────────────────────────────────────────────────────
@@ -984,6 +1156,69 @@ function SpendingDetail({ summary, transactions, month, setMonth, onTxCategoryCh
         </section>
       )}
 
+      {/* ── Confirmed Subscriptions ── */}
+      {confirmedSubs.length > 0 && (
+        <section className="page-section">
+          <h2 className="section-title">Subscriptions</h2>
+          <div className="card" style={{ padding: '4px 0' }}>
+            {confirmedSubs.map((sub) => {
+              const cat   = CATEGORY_MAP[sub.category] || CATEGORY_MAP['other']
+              const isOld = !sub.chargedThisMonth
+              return (
+                <div key={sub.merchant} className="fin-sub-row">
+                  <div className="fin-sub-left">
+                    <span className="fin-sub-icon">{cat.icon}</span>
+                    <div className="fin-sub-info">
+                      <span className="fin-sub-name">{sub.merchant}</span>
+                      <span className="fin-sub-meta">
+                        {sub.frequency} · {sub.months} months
+                        {isOld && <span className="fin-sub-badge-inactive"> · not this month ⚠</span>}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="fin-sub-right">
+                    <span className={`fin-sub-amt${isOld ? ' fin-sub-amt--inactive' : ''}`}>{fmtUSD(sub.amount)}</span>
+                    <span className="fin-sub-freq">/mo</span>
+                    <button className="fin-sub-remove" onClick={() => saveChoice(sub.merchant, 'no')} title="Remove">×</button>
+                  </div>
+                </div>
+              )
+            })}
+            <div className="fin-sub-total-row">
+              <span>Total per month</span>
+              <span>{fmtUSD(confirmedSubs.reduce((s, sub) => s + sub.amount, 0))}</span>
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* ── Pending review ── */}
+      {pendingSubs.length > 0 && (
+        <section className="page-section">
+          <h2 className="section-title">Recurring — Is This A Subscription?</h2>
+          <div className="card" style={{ padding: '4px 0' }}>
+            {pendingSubs.map((sub) => {
+              const cat = CATEGORY_MAP[sub.category] || CATEGORY_MAP['other']
+              return (
+                <div key={sub.merchant} className="fin-sub-review-row">
+                  <div className="fin-sub-left">
+                    <span className="fin-sub-icon">{cat.icon}</span>
+                    <div className="fin-sub-info">
+                      <span className="fin-sub-name">{sub.merchant}</span>
+                      <span className="fin-sub-meta">Charged {sub.count}× over {sub.months} months · {fmtUSD(sub.amount)}</span>
+                    </div>
+                  </div>
+                  <div className="fin-sub-review-btns">
+                    <button className="fin-sub-btn-yes" onClick={() => saveChoice(sub.merchant, 'yes')}>Yes</button>
+                    <button className="fin-sub-btn-no"  onClick={() => saveChoice(sub.merchant, 'no')}>No</button>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </section>
+      )}
+
       {/* ── Top Merchants ── */}
       {topMerchants.length > 0 && (
         <section className="page-section">
@@ -1014,24 +1249,120 @@ function SpendingDetail({ summary, transactions, month, setMonth, onTxCategoryCh
   )
 }
 
-function AllTransactions({ transactions, month, setMonth, onTxCategoryChange, onBack }) {
-  const sorted = [...transactions].sort((a, b) => (b.date || '').localeCompare(a.date || ''))
+function AllTransactions({ transactions, summary, month, setMonth, onTxCategoryChange, onBack }) {
+  const [activeAccount, setActiveAccount] = useState('all')
+
+  // Build a map of account_id → account info from summary
+  const allAccounts = [
+    ...(summary?.cash?.accounts     || []),
+    ...(summary?.credit?.accounts   || []),
+    ...(summary?.investments?.accounts || []),
+  ]
+  const accountMap = Object.fromEntries(allAccounts.map(a => [a.account_id, a]))
+
+  // Only show tabs for accounts that actually have transactions this month
+  const accountsWithTx = allAccounts.filter(a =>
+    transactions.some(t => t.account_id === a.account_id)
+  )
+
+  // Short label for tab: institution + last 4
+  const tabLabel = (a) => {
+    const base = (a.institution_name || a.account_name || 'Account').split(' ')[0]
+    return a.last_four ? `${base} ···${a.last_four}` : base
+  }
+
+  // Filter + sort
+  const filtered = (activeAccount === 'all'
+    ? [...transactions]
+    : transactions.filter(t => t.account_id === activeAccount)
+  ).sort((a, b) => (b.date || '').localeCompare(a.date || ''))
+
+  // Group by date
+  const byDate = []
+  let lastDate = null
+  for (const tx of filtered) {
+    const d = tx.date || ''
+    if (d !== lastDate) { byDate.push({ date: d, txs: [] }); lastDate = d }
+    byDate[byDate.length - 1].txs.push(tx)
+  }
+
+  // Running total for the filtered set
+  const EXCLUDE = new Set(['transfer', 'investing'])
+  const netAmt = filtered.reduce((s, t) => {
+    const amt = parseFloat(t.amount)
+    if (t.is_transfer || EXCLUDE.has(t.category)) return s
+    return s + amt
+  }, 0)
+
   return (
     <div className="page">
       <div className="fin-detail-header">
         <button className="fin-back-btn" onClick={onBack}>‹ Back</button>
-        <h2 className="section-title">All Transactions</h2>
+        <h2 className="section-title">Transactions</h2>
         <MonthSelector month={month} onChange={setMonth} />
       </div>
-      <section className="page-section">
-        <div className="card-list">
-          {sorted.length === 0
-            ? <div className="empty-state">No transactions for {monthLabel(month)}</div>
-            : sorted.map((tx, i) => (
-                <TxRow key={tx.transaction_id || tx.id || i} tx={tx} onCategoryChange={onTxCategoryChange} />
-              ))
-          }
+
+      {/* Account filter tabs */}
+      {accountsWithTx.length > 1 && (
+        <section className="page-section" style={{ paddingBottom: 0 }}>
+          <div className="fin-tx-tabs">
+            <button
+              className={`fin-tx-tab ${activeAccount === 'all' ? 'active' : ''}`}
+              onClick={() => setActiveAccount('all')}
+            >
+              All
+            </button>
+            {accountsWithTx.map(a => (
+              <button
+                key={a.account_id}
+                className={`fin-tx-tab ${activeAccount === a.account_id ? 'active' : ''}`}
+                onClick={() => setActiveAccount(a.account_id)}
+              >
+                {tabLabel(a)}
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* Summary row */}
+      <section className="page-section" style={{ paddingTop: 8, paddingBottom: 4 }}>
+        <div className="fin-tx-summary-row">
+          <span className="fin-tx-summary-count">{filtered.length} transactions</span>
+          <span className={`fin-tx-summary-net ${netAmt >= 0 ? 'positive' : 'negative'}`}>
+            Net {netAmt >= 0 ? '+' : ''}{fmtUSD(netAmt)}
+          </span>
         </div>
+      </section>
+
+      {/* Grouped by date */}
+      <section className="page-section">
+        {filtered.length === 0 ? (
+          <div className="empty-state">No transactions for {monthLabel(month)}</div>
+        ) : (
+          byDate.map(({ date, txs }) => (
+            <div key={date} className="fin-tx-date-group">
+              <div className="fin-tx-date-header">{formatDate(date)}</div>
+              <div className="card-list">
+                {txs.map((tx, i) => {
+                  const acc = accountMap[tx.account_id]
+                  const inst = acc ? (acc.institution_name || acc.account_name || 'Account').split(' ')[0] : null
+                  const label = acc
+                    ? (acc.last_four ? `${inst} ···${acc.last_four}` : inst)
+                    : null
+                  return (
+                    <TxRow
+                      key={tx.transaction_id || tx.id || i}
+                      tx={tx}
+                      accountLabel={label}
+                      onCategoryChange={onTxCategoryChange}
+                    />
+                  )
+                })}
+              </div>
+            </div>
+          ))
+        )}
       </section>
     </div>
   )
@@ -1073,6 +1404,7 @@ function ManageAccounts({ enrollments, onDisconnect, onDisconnectAll, onBack }) 
 export default function Finance() {
   const data = useFinanceData()
   const snap = useSnaptradeData()
+  const subs = useSubscriptions()
   const [view,  setView]  = useState('dashboard') // dashboard | cash | credit | investments | spending | transactions | manage
   const [toast, setToast] = useState(null)
 
@@ -1161,12 +1493,14 @@ export default function Finance() {
       month={data.month}
       setMonth={data.setMonth}
       onTxCategoryChange={data.updateTransactionCategory}
+      subscriptions={subs}
       onBack={() => setView('dashboard')}
     />
   )
   if (view === 'transactions') return (
     <AllTransactions
       transactions={data.transactions}
+      summary={data.summary}
       month={data.month}
       setMonth={data.setMonth}
       onTxCategoryChange={data.updateTransactionCategory}
@@ -1184,18 +1518,22 @@ export default function Finance() {
 
   // ── Dashboard ──
   const sp = data.summary?.spending
+  const netWorth = (data.summary?.cash?.total || 0) +
+    (data.summary?.investments?.total || 0) +
+    snap.snapTotal -
+    (data.summary?.credit?.total || 0)
+
   return (
     <div className="page">
       {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
 
-      {/* Header actions */}
+      {/* Toolbar */}
       <div className="fin-toolbar">
-        <MonthSelector month={data.month} onChange={data.setMonth} />
         <div className="fin-toolbar-actions">
           <button className="action-btn" onClick={handleSync} disabled={data.syncing}>
             {data.syncing ? 'Syncing…' : '↻ Sync'}
           </button>
-          <button className="action-btn" onClick={openTeller} disabled={!tellerReady}>+ Add Bank</button>
+          <button className="action-btn" onClick={openTeller} disabled={!tellerReady}>+ Add</button>
           <button className="action-btn" onClick={() => setView('manage')}>Manage</button>
         </div>
       </div>
@@ -1207,74 +1545,85 @@ export default function Finance() {
         </div>
       )}
 
-      {/* Summary cards */}
+      {/* Net Worth hero */}
       <section className="page-section">
-        <div className="fin-cards-grid">
-          <SummaryCard
-            label="Cash"
-            value={data.summary?.cash?.total}
-            sub={`${data.summary?.cash?.accounts?.length || 0} accounts`}
-            accent="var(--accent)"
-            onClick={() => setView('cash')}
-            icon="🏦"
-          />
-          <SummaryCard
-            label="Credit Cards"
-            value={data.summary?.credit?.total}
-            sub={`${data.summary?.credit?.accounts?.length || 0} cards`}
-            accent="#ff6b35"
-            onClick={() => setView('credit')}
-            icon="💳"
-          />
-          <SummaryCard
-            label="Investments"
-            value={(data.summary?.investments?.total || 0) + snap.snapTotal}
-            sub={`${data.summary?.investments?.accounts?.length || 0} accounts${snap.snapLinked ? ' + Vanguard' : ''}`}
-            accent="#00ff9d"
-            onClick={() => setView('investments')}
-            icon="📈"
-          />
-          <SummaryCard
-            label="Spent"
-            value={sp?.expenses}
-            sub={sp?.income ? `Income: +${fmtUSD(sp.income)}` : monthLabel(data.month)}
-            accent="#ff2d78"
-            onClick={() => setView('spending')}
-            icon="💸"
-          />
+        <div className="fin-nw-hero">
+          <span className="fin-nw-hero-label">Net Worth</span>
+          <span className="fin-nw-hero-value">{fmtUSD(netWorth)}</span>
         </div>
       </section>
 
-      {/* Net worth */}
-      {data.summary && (
-        <section className="page-section">
-          <div className="card net-worth-card">
-            <span className="nw-label">Net Worth</span>
-            <span className="nw-value">
-              {fmtUSD(
-                (data.summary.cash?.total || 0) +
-                (data.summary.investments?.total || 0) +
-                snap.snapTotal -
-                (data.summary.credit?.total || 0)
-              )}
-            </span>
-          </div>
-        </section>
-      )}
-
-      {/* Recent transactions */}
+      {/* Summary rows */}
       <section className="page-section">
-        <div className="section-header">
-          <h2 className="section-title">Recent Transactions</h2>
-          <button className="action-btn" onClick={() => setView('transactions')}>See all</button>
-        </div>
-        <div className="card-list">
-          {data.transactions.length === 0
-            ? <div className="empty-state">No transactions yet. <button className="inline-sync-btn" onClick={handleSync}>Sync now</button></div>
-            : data.transactions.slice(0, 10).map((tx, i) => (
-                <TxRow key={tx.transaction_id || tx.id || i} tx={tx} onCategoryChange={data.updateTransactionCategory} />
-              ))
-          }
+        <div className="fin-summary-list">
+          <button className="fin-summary-row fin-summary-row--blue" onClick={() => setView('cash')}>
+            <div className="fin-sr-left">
+              <span className="fin-sr-icon">🏦</span>
+              <div className="fin-sr-info">
+                <span className="fin-sr-label">Cash</span>
+                <span className="fin-sr-sub">{data.summary?.cash?.accounts?.length || 0} accounts</span>
+              </div>
+            </div>
+            <div className="fin-sr-right">
+              <span className="fin-sr-value">{fmtUSD(data.summary?.cash?.total)}</span>
+              <span className="fin-sr-arrow">›</span>
+            </div>
+          </button>
+
+          <button className="fin-summary-row fin-summary-row--red" onClick={() => setView('credit')}>
+            <div className="fin-sr-left">
+              <span className="fin-sr-icon">💳</span>
+              <div className="fin-sr-info">
+                <span className="fin-sr-label">Credit Cards</span>
+                <span className="fin-sr-sub">{data.summary?.credit?.accounts?.length || 0} cards</span>
+              </div>
+            </div>
+            <div className="fin-sr-right">
+              <span className="fin-sr-value fin-sr-value--red">{fmtUSD(data.summary?.credit?.total)}</span>
+              <span className="fin-sr-arrow">›</span>
+            </div>
+          </button>
+
+          <button className="fin-summary-row fin-summary-row--green" onClick={() => setView('investments')}>
+            <div className="fin-sr-left">
+              <span className="fin-sr-icon">📈</span>
+              <div className="fin-sr-info">
+                <span className="fin-sr-label">Investments</span>
+                <span className="fin-sr-sub">{snap.snapLinked ? 'Vanguard + TSP' : `${data.summary?.investments?.accounts?.length || 0} accounts`}</span>
+              </div>
+            </div>
+            <div className="fin-sr-right">
+              <span className="fin-sr-value fin-sr-value--green">{fmtUSD((data.summary?.investments?.total || 0) + snap.snapTotal)}</span>
+              <span className="fin-sr-arrow">›</span>
+            </div>
+          </button>
+
+          <button className="fin-summary-row fin-summary-row--pink" onClick={() => setView('spending')}>
+            <div className="fin-sr-left">
+              <span className="fin-sr-icon">💸</span>
+              <div className="fin-sr-info">
+                <span className="fin-sr-label">Spent</span>
+                <span className="fin-sr-sub">{sp?.income ? `Income ${fmtUSD(sp.income)}` : 'This month'}</span>
+              </div>
+            </div>
+            <div className="fin-sr-right">
+              <span className="fin-sr-value fin-sr-value--red">{fmtUSD(sp?.expenses)}</span>
+              <span className="fin-sr-arrow">›</span>
+            </div>
+          </button>
+
+          <button className="fin-summary-row" onClick={() => setView('transactions')}>
+            <div className="fin-sr-left">
+              <span className="fin-sr-icon">🧾</span>
+              <div className="fin-sr-info">
+                <span className="fin-sr-label">Transactions</span>
+                <span className="fin-sr-sub">{data.transactions.length} this month</span>
+              </div>
+            </div>
+            <div className="fin-sr-right">
+              <span className="fin-sr-arrow">›</span>
+            </div>
+          </button>
         </div>
       </section>
     </div>
