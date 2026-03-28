@@ -986,8 +986,23 @@ app.delete('/api/snaptrade/disconnect', async (req, res) => {
 
 const OURA_BASE = 'https://api.ouraring.com'
 
-function getOuraToken() {
-  return readTokens().oura_token || process.env.VITE_OURA_ACCESS_TOKEN || null
+async function getOuraToken() {
+  // 1. Local encrypted file (dev / persistent server)
+  const fromFile = readTokens().oura_token
+  if (fromFile) return fromFile
+  // 2. Env var (Vercel environment variable)
+  if (process.env.VITE_OURA_ACCESS_TOKEN) return process.env.VITE_OURA_ACCESS_TOKEN
+  // 3. Supabase settings table (Vercel: file is ephemeral, DB is not)
+  if (supabase) {
+    try {
+      const { data } = await supabase.from('settings').select('value').eq('key', 'oura_token').single()
+      if (data?.value) {
+        const tokens = readTokens(); tokens.oura_token = data.value; saveTokens(tokens)
+        return data.value
+      }
+    } catch { /* ignore */ }
+  }
+  return null
 }
 
 async function ouraFetch(path, token) {
@@ -1019,8 +1034,8 @@ app.post('/api/oura/connect', async (req, res) => {
   }
 })
 
-app.get('/api/oura/status', (req, res) => {
-  res.json({ linked: !!getOuraToken() })
+app.get('/api/oura/status', async (req, res) => {
+  res.json({ linked: !!(await getOuraToken()) })
 })
 
 app.delete('/api/oura/disconnect', async (req, res) => {
@@ -1034,7 +1049,7 @@ app.delete('/api/oura/disconnect', async (req, res) => {
 })
 
 app.get('/api/oura/today', async (req, res) => {
-  const token = getOuraToken()
+  const token = await getOuraToken()
   if (!token) return res.status(404).json({ error: 'Not connected' })
 
   const today     = req.query.date || new Date().toISOString().slice(0, 10)
@@ -1114,7 +1129,7 @@ app.get('/api/oura/today', async (req, res) => {
 
 // 7-30 day history for trends/sleep charts
 app.get('/api/oura/week', async (req, res) => {
-  const token = getOuraToken()
+  const token = await getOuraToken()
   if (!token) return res.status(404).json({ error: 'Not connected' })
 
   const days  = Math.min(parseInt(req.query.days) || 30, 90)
