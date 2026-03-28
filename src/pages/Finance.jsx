@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { supabase, sb } from '../lib/supabase'
 import './Page.css'
 import './Finance.css'
 
@@ -926,10 +927,29 @@ function SpendingDetail({ summary, transactions, month, setMonth, onTxCategoryCh
     try { return JSON.parse(localStorage.getItem('aaron_sub_choices') || '{}') }
     catch { return {} }
   })
+
+  // Load choices from Supabase on mount and merge with localStorage
+  useEffect(() => {
+    if (!supabase) return
+    sb(supabase.from('subscription_choices').select('merchant, choice'))
+      .then(({ data } = {}) => {
+        if (!data?.length) return
+        const remote = Object.fromEntries(data.map(r => [r.merchant, r.choice]))
+        setSubChoices(prev => {
+          const merged = { ...prev, ...remote }
+          localStorage.setItem('aaron_sub_choices', JSON.stringify(merged))
+          return merged
+        })
+      })
+  }, []) // eslint-disable-line
+
   const saveChoice = (merchant, choice) => {
     const next = { ...subChoices, [merchant]: choice }
     setSubChoices(next)
     localStorage.setItem('aaron_sub_choices', JSON.stringify(next))
+    if (supabase) {
+      sb(supabase.from('subscription_choices').upsert({ merchant, choice }))
+    }
   }
   const confirmedSubs = subscriptions.filter(s => subChoices[s.merchant] === 'yes')
   const pendingSubs   = subscriptions.filter(s => !subChoices[s.merchant])
