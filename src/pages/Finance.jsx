@@ -928,14 +928,23 @@ function SpendingDetail({ summary, transactions, month, setMonth, onTxCategoryCh
     catch { return {} }
   })
 
-  // Load choices from Supabase on mount and merge with localStorage
+  // Sync choices with Supabase on mount:
+  // - Pull remote rows and merge (remote wins for conflicts)
+  // - Upload any local choices that aren't in Supabase yet (migration)
   useEffect(() => {
     if (!supabase) return
     sb(supabase.from('subscription_choices').select('merchant, choice'))
       .then(({ data } = {}) => {
-        if (!data?.length) return
-        const remote = Object.fromEntries(data.map(r => [r.merchant, r.choice]))
+        const remote = Object.fromEntries((data || []).map(r => [r.merchant, r.choice]))
         setSubChoices(prev => {
+          // Push local choices that Supabase doesn't have yet
+          const toUpload = Object.entries(prev)
+            .filter(([merchant]) => !remote[merchant])
+            .map(([merchant, choice]) => ({ merchant, choice }))
+          if (toUpload.length) {
+            sb(supabase.from('subscription_choices').upsert(toUpload))
+          }
+          // Merge: remote wins for any conflicts
           const merged = { ...prev, ...remote }
           localStorage.setItem('aaron_sub_choices', JSON.stringify(merged))
           return merged
