@@ -1,19 +1,7 @@
-import { getSupabase } from './supabase.js'
-
 const OURA_BASE = 'https://api.ouraring.com'
 
 export async function getOuraToken() {
-  // 1. Env var (set in Vercel dashboard)
-  if (process.env.VITE_OURA_ACCESS_TOKEN) return process.env.VITE_OURA_ACCESS_TOKEN
-  // 2. Supabase settings table (saved when user connected via UI)
-  const supabase = getSupabase()
-  if (supabase) {
-    try {
-      const { data } = await supabase.from('settings').select('value').eq('key', 'oura_token').single()
-      if (data?.value) return data.value
-    } catch { /* ignore */ }
-  }
-  return null
+  return process.env.VITE_OURA_ACCESS_TOKEN || null
 }
 
 export async function ouraFetch(path, token) {

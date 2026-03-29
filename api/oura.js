@@ -13,16 +13,8 @@ export default async function handler(req, res) {
 
   // POST /api/oura/connect
   if (sub === 'connect' && req.method === 'POST') {
-    const { token } = req.body || {}
-    if (!token?.trim()) return res.status(400).json({ error: 'Token required' })
-    try {
-      await ouraFetch('/v2/usercollection/personal_info', token.trim())
-      const supabase = getSupabase()
-      if (supabase) await supabase.from('settings').upsert({ key: 'oura_token', value: token.trim() })
-      return res.json({ success: true })
-    } catch {
-      return res.status(401).json({ error: 'Invalid token — double-check your Personal Access Token' })
-    }
+    // Token is managed via VITE_OURA_ACCESS_TOKEN env var in Vercel, not stored here
+    return res.status(400).json({ error: 'Set VITE_OURA_ACCESS_TOKEN in Vercel environment variables' })
   }
 
   // GET /api/oura/today
