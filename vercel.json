@@ -1,6 +1,11 @@
 {
   "rewrites": [
-    { "source": "/((?!api).*)", "destination": "/" }
+    { "source": "/api/teller/:path*",    "destination": "/api/teller" },
+    { "source": "/api/finance/:path*",   "destination": "/api/finance" },
+    { "source": "/api/snaptrade/:path*", "destination": "/api/snaptrade" },
+    { "source": "/api/oura/:path*",      "destination": "/api/oura" },
+    { "source": "/api/gym/:path*",       "destination": "/api/gym" },
+    { "source": "/((?!api).*)",          "destination": "/" }
   ],
   "headers": [
     {
