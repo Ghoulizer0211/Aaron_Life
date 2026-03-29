@@ -28,8 +28,9 @@ function fmtUSD(n) {
 
 function formatDate(d) {
   if (!d) return ''
-  const today = new Date().toISOString().slice(0, 10)
-  const yest  = new Date(Date.now() - 86400000).toISOString().slice(0, 10)
+  const ptDate = (dt) => new Date(dt).toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' })
+  const today = ptDate(Date.now())
+  const yest  = ptDate(Date.now() - 86400000)
   if (d === today) return 'Today'
   if (d === yest)  return 'Yesterday'
   return new Date(d + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
@@ -727,16 +728,73 @@ function CreditDetail({ summary, transactions, month, setMonth, onCategoryChange
   )
 }
 
-function InvestmentsDetail({ summary, snap, transactions, month, setMonth, onReload, onCategoryChange, onTxCategoryChange, onBack }) {
+// ── Brokerage Accordion ───────────────────────────────────────────────────────
+
+function BrokerageAccordion({ brokerageName, accounts }) {
+  const [open, setOpen] = useState(false)
+  const total = accounts.reduce((s, a) => s + parseFloat(a.current_balance || 0), 0)
+
+  return (
+    <div className="fin-accordion">
+      <button className="fin-accordion-header" onClick={() => setOpen(o => !o)}>
+        <div className="acc-left">
+          <span className="acc-icon investment" />
+          <div className="acc-info">
+            <span className="acc-name">{brokerageName}</span>
+            <span className="acc-meta" style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+              {accounts.length} account{accounts.length !== 1 ? 's' : ''}
+            </span>
+          </div>
+        </div>
+        <div className="fin-accordion-right">
+          <span className="acc-balance" style={{ color: 'var(--green)' }}>{fmtUSD(total)}</span>
+          <span className="fin-accordion-chevron">{open ? '∨' : '›'}</span>
+        </div>
+      </button>
+      {open && (
+        <div>
+          {accounts.map((a, i) => {
+            // Raw name format: "First Last — Account Type — Number"
+            // Extract just the account type (second-to-last segment)
+            const parts = (a.account_name || '').split(' — ')
+            const label = parts.length >= 3 ? parts[parts.length - 2] : (a.account_name || a.subtype || 'Investment')
+            const bal   = parseFloat(a.current_balance || 0)
+            return (
+              <div key={a.account_id || i} style={{
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                padding: '12px 16px 12px 36px', borderBottom: '1px solid var(--border)',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'var(--green)', flexShrink: 0, display: 'inline-block' }} />
+                  <span style={{ fontSize: '15px', fontWeight: 500, color: 'var(--text)' }}>{label}</span>
+                </div>
+                <span style={{ fontSize: '15px', fontWeight: 600, color: 'var(--green)' }}>{fmtUSD(bal)}</span>
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function InvestmentsDetail({ summary, snap, onReload, onBack }) {
   const accounts = summary?.investments?.accounts || []
   const total    = summary?.investments?.total    || 0
+
+  // Group by institution_name (brokerage) — e.g. "Vanguard"
+  const groups = {}
+  for (const a of accounts) {
+    const key = a.institution_name || 'Other'
+    if (!groups[key]) groups[key] = []
+    groups[key].push(a)
+  }
 
   return (
     <div className="page">
       <div className="fin-detail-header">
         <button className="fin-back-btn" onClick={onBack}>‹ Back</button>
         <h2 className="section-title">Investments</h2>
-        <MonthSelector month={month} onChange={setMonth} />
       </div>
 
       <section className="page-section">
@@ -746,53 +804,16 @@ function InvestmentsDetail({ summary, snap, transactions, month, setMonth, onRel
         </div>
       </section>
 
-      {accounts.length > 0 && (
+      {Object.keys(groups).length > 0 && (
         <section className="page-section">
           <div className="fin-accordion-list">
-            {accounts.map((a, i) => (
-              <AccordionAccount
-                key={a.account_id || i}
-                account={a}
-                transactions={transactions}
-                onCategoryChange={onCategoryChange}
-                onTxCategoryChange={onTxCategoryChange}
-              />
+            {Object.entries(groups).map(([brokerage, accts]) => (
+              <BrokerageAccordion key={brokerage} brokerageName={brokerage} accounts={accts} />
             ))}
           </div>
         </section>
       )}
 
-      {/* SnapTrade connection portal */}
-      <section className="page-section">
-        <div className="section-header">
-          <h2 className="section-title">Connect Account</h2>
-          {snap.snapLinked && (
-            <button className="action-btn" style={{ color: 'var(--red)' }}
-              onClick={() => snap.disconnect(onReload)}>
-              Disconnect
-            </button>
-          )}
-        </div>
-        <div className="card" style={{ padding: '20px 16px', display: 'flex', flexDirection: 'column', gap: '12px', alignItems: 'flex-start' }}>
-          <p style={{ color: 'var(--text-secondary)', fontSize: '14px', lineHeight: 1.6 }}>
-            {snap.snapLinked
-              ? 'Add another account (Vanguard, TSP, Fidelity, Schwab, and more).'
-              : 'Connect your investment accounts to see balances and transactions. Supports Vanguard, TSP, Fidelity, Schwab, and more.'}
-          </p>
-          {snap.snapError && <p style={{ color: 'var(--red)', fontSize: '13px' }}>{snap.snapError}</p>}
-          <button className="connect-btn" style={{ fontSize: '15px', padding: '10px 24px', alignSelf: 'center' }}
-            onClick={snap.connect} disabled={snap.snapLoading}>
-            {snap.snapLoading ? 'Opening…' : snap.snapLinked ? '+ Add Another Account' : 'Connect Investment Account'}
-          </button>
-          <p style={{ color: 'var(--text-muted)', fontSize: '12px', alignSelf: 'center' }}>
-            A SnapTrade page will open in a new tab. After connecting, come back and tap below.
-          </p>
-          <button className="action-btn" style={{ alignSelf: 'center' }}
-            onClick={() => snap.afterConnect(onReload)} disabled={snap.snapLoading}>
-            {snap.snapLoading ? 'Syncing…' : '✓ Done — sync my accounts'}
-          </button>
-        </div>
-      </section>
     </div>
   )
 }
@@ -1338,33 +1359,63 @@ function AllTransactions({ transactions, summary, month, setMonth, onTxCategoryC
   )
 }
 
-function ManageAccounts({ enrollments, onDisconnect, onDisconnectAll, onBack }) {
+function ManageAccounts({ enrollments, onDisconnect, onDisconnectAll, investmentAccounts, onDisconnectSnap, onBack }) {
+  // Group investment accounts by brokerage
+  const snapGroups = {}
+  for (const a of (investmentAccounts || [])) {
+    const key = a.institution_name || 'Investment'
+    if (!snapGroups[key]) snapGroups[key] = []
+    snapGroups[key].push(a)
+  }
+  const snapBrokerages = Object.keys(snapGroups)
+
   return (
     <div className="page">
       <div className="fin-detail-header">
         <button className="fin-back-btn" onClick={onBack}>‹ Back</button>
         <h2 className="section-title">Manage Accounts</h2>
       </div>
-      <section className="page-section">
-        <div className="card-list">
-          {enrollments.map(e => (
-            <div key={e.enrollmentId} className="card bank-row">
-              <div className="bank-left">
-                <span className="bank-dot" />
-                <span className="bank-name">{e.institutionName}</span>
+
+      {/* Teller — bank & credit accounts */}
+      {enrollments.length > 0 && (
+        <section className="page-section">
+          <h3 className="section-title" style={{ fontSize: '13px', color: 'var(--text-muted)', marginBottom: 8 }}>BANK &amp; CREDIT</h3>
+          <div className="card-list">
+            {enrollments.map(e => (
+              <div key={e.enrollmentId} className="card bank-row">
+                <div className="bank-left">
+                  <span className="bank-dot" />
+                  <span className="bank-name">{e.institutionName}</span>
+                </div>
+                <button className="remove-btn" onClick={() => onDisconnect(e.enrollmentId)}>Remove</button>
               </div>
-              <button className="remove-btn" onClick={() => onDisconnect(e.enrollmentId)}>
-                Remove
-              </button>
-            </div>
-          ))}
-        </div>
-        {enrollments.length > 1 && (
-          <button className="remove-btn" style={{marginTop:12,width:'100%'}} onClick={onDisconnectAll}>
-            Disconnect All
-          </button>
-        )}
-      </section>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* SnapTrade — investment accounts */}
+      {snapBrokerages.length > 0 && (
+        <section className="page-section">
+          <h3 className="section-title" style={{ fontSize: '13px', color: 'var(--text-muted)', marginBottom: 8 }}>INVESTMENTS</h3>
+          <div className="card-list">
+            {snapBrokerages.map(broker => (
+              <div key={broker} className="card bank-row">
+                <div className="bank-left">
+                  <span className="bank-dot" style={{ background: 'var(--green)' }} />
+                  <div>
+                    <span className="bank-name">{broker}</span>
+                    <span style={{ fontSize: '12px', color: 'var(--text-muted)', marginLeft: 8 }}>
+                      {snapGroups[broker].length} account{snapGroups[broker].length !== 1 ? 's' : ''}
+                    </span>
+                  </div>
+                </div>
+                <button className="remove-btn" onClick={onDisconnectSnap}>Remove</button>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
     </div>
   )
 }
@@ -1375,8 +1426,17 @@ export default function Finance() {
   const data = useFinanceData()
   const snap = useSnaptradeData()
   const subs = useSubscriptions()
-  const [view,  setView]  = useState('dashboard') // dashboard | cash | credit | investments | spending | transactions | manage
-  const [toast, setToast] = useState(null)
+  const [view,       setView]       = useState('dashboard') // dashboard | cash | credit | investments | spending | transactions | manage
+  const [toast,      setToast]      = useState(null)
+  const [addMenu, setAddMenu] = useState(false)  // + Add dropdown open
+  const addMenuRef = useRef(null)
+
+  useEffect(() => {
+    if (!addMenu) return
+    const handler = (e) => { if (addMenuRef.current && !addMenuRef.current.contains(e.target)) setAddMenu(false) }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [addMenu])
 
   const showToast = useCallback((message, type = 'success') => {
     setToast({ message, type })
@@ -1392,11 +1452,25 @@ export default function Finance() {
 
   const handleSync = async () => {
     try {
-      await data.sync()
+      await Promise.allSettled([
+        data.sync(),
+        snap.afterConnect(data.load),
+      ])
       showToast('Synced successfully!')
     } catch (err) {
       showToast(err.message, 'error')
     }
+  }
+
+  const handleAddTeller = () => {
+    setAddMenu(false)
+    openTeller()
+  }
+
+  const handleAddInvestment = async () => {
+    setAddMenu(false)
+    await snap.connect()
+    showToast('After connecting, tap Sync to update your accounts.')
   }
 
   const linked = data.enrollments.length > 0 || data.summary != null
@@ -1457,12 +1531,7 @@ export default function Finance() {
     <InvestmentsDetail
       summary={data.summary}
       snap={snap}
-      transactions={data.transactions}
-      month={data.month}
-      setMonth={data.setMonth}
       onReload={data.load}
-      onCategoryChange={data.updateAccountCategory}
-      onTxCategoryChange={data.updateTransactionCategory}
       onBack={() => setView('dashboard')}
     />
   )
@@ -1492,6 +1561,8 @@ export default function Finance() {
       enrollments={data.enrollments}
       onDisconnect={data.disconnect}
       onDisconnectAll={data.disconnectAll}
+      investmentAccounts={data.summary?.investments?.accounts || []}
+      onDisconnectSnap={() => snap.disconnect(data.load)}
       onBack={() => setView('dashboard')}
     />
   )
@@ -1509,10 +1580,33 @@ export default function Finance() {
       {/* Toolbar */}
       <div className="fin-toolbar">
         <div className="fin-toolbar-actions">
-          <button className="action-btn" onClick={handleSync} disabled={data.syncing}>
-            {data.syncing ? 'Syncing…' : '↻ Sync'}
+          <button className="action-btn" onClick={handleSync} disabled={data.syncing || snap.snapLoading}>
+            {data.syncing || snap.snapLoading ? 'Syncing…' : '↻ Sync'}
           </button>
-          <button className="action-btn" onClick={openTeller} disabled={!tellerReady}>+ Add</button>
+          <div style={{ position: 'relative' }} ref={addMenuRef}>
+            <button className="action-btn" onClick={() => setAddMenu(m => !m)} disabled={!tellerReady}>+ Add</button>
+            {addMenu && (
+              <div style={{
+                position: 'absolute', top: '100%', left: 0, zIndex: 100, marginTop: 4,
+                background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8,
+                minWidth: 180, boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
+              }}>
+                <button onClick={handleAddTeller} style={{
+                  display: 'block', width: '100%', padding: '10px 16px', textAlign: 'left',
+                  background: 'none', border: 'none', color: 'var(--text)', fontSize: '14px', cursor: 'pointer',
+                }}>
+                  🏦 Bank / Credit Card
+                </button>
+                <button onClick={handleAddInvestment} style={{
+                  display: 'block', width: '100%', padding: '10px 16px', textAlign: 'left',
+                  background: 'none', border: 'none', color: 'var(--text)', fontSize: '14px', cursor: 'pointer',
+                  borderTop: '1px solid var(--border)',
+                }}>
+                  📈 Investment Account
+                </button>
+              </div>
+            )}
+          </div>
           <button className="action-btn" onClick={() => setView('manage')}>Manage</button>
         </div>
       </div>

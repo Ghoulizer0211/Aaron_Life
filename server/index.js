@@ -280,12 +280,10 @@ async function fetchAllTellerData(preFetchedAccounts = {}) {
       for (const acc of rawAccounts) {
         // Teller does NOT include balance in /accounts — need separate call
         let currentBalance = 0
-        let availableBalance = 0
         try {
           const bal = await tellerFetch(`/accounts/${acc.id}/balances`, enrollment.accessToken)
-          currentBalance  = parseFloat(bal.ledger   ?? bal.current  ?? 0)
-          availableBalance = parseFloat(bal.available ?? bal.ledger  ?? 0)
-          console.log(`[teller] balance for ${acc.name}: ledger=${currentBalance} available=${availableBalance}`)
+          currentBalance = parseFloat(bal.ledger ?? bal.current ?? 0)
+          console.log(`[teller] balance for ${acc.name}: ledger=${currentBalance}`)
         } catch (balErr) {
           console.warn(`[teller] balance failed for ${acc.id}:`, balErr.message)
         }
@@ -307,9 +305,8 @@ async function fetchAllTellerData(preFetchedAccounts = {}) {
           type:           mapTellerType(acc.type, acc.subtype),
           subtype:        acc.subtype || acc.type,
           category_group,
-          balance:        availableBalance,
-          current_balance:  currentBalance,
-          available_balance: availableBalance,
+          balance:         currentBalance,
+          current_balance: currentBalance,
           enrollmentId:   enrollment.enrollmentId,
           institutionName: enrollment.institutionName,
           institution_name: enrollment.institutionName,
@@ -327,7 +324,6 @@ async function fetchAllTellerData(preFetchedAccounts = {}) {
             subtype:           acc.subtype || acc.type,
             category_group,
             current_balance:   currentBalance,
-            available_balance: availableBalance,
             last_four:         acc.last_four,
             institution_name:  enrollment.institutionName,
             last_synced_at:    new Date().toISOString(),
@@ -345,20 +341,19 @@ async function fetchAllTellerData(preFetchedAccounts = {}) {
         }
 
         try {
-          // Incremental sync using Teller's from_id param:
-          // - First sync: fetch all transactions (no from_id)
-          // - Subsequent syncs: fetch only transactions newer than the last seen ID
-          //   This avoids re-downloading thousands of old transactions on every sync.
-          const tokens       = readTokens()
-          const lastTxId     = (tokens.last_tx_id || {})[acc.id]
-          const txPath = lastTxId
-            ? `/accounts/${acc.id}/transactions?from_id=${lastTxId}`
-            : `/accounts/${acc.id}/transactions`
+          // Incremental sync using Teller's start_date param:
+          // - First sync: fetch from 2026-01-01 onwards
+          // - Subsequent syncs: fetch from the last sync date
+          const tokens        = readTokens()
+          const lastSyncedAt  = (tokens.synced_accounts || {})[acc.id]
+          const startDate     = lastSyncedAt
+            ? new Date(lastSyncedAt).toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' })
+            : '2026-01-01'
+          const txPath = `/accounts/${acc.id}/transactions?start_date=${startDate}`
 
           const rawTx = await tellerFetch(txPath, enrollment.accessToken)
-          // Only keep transactions from Jan 2026 onwards — ignore old history
-          const filteredTx = rawTx.filter(tx => tx.date >= '2026-01-01')
-          console.log(`[teller] got ${rawTx.length} tx for ${acc.name} (${lastTxId ? `incremental from ${lastTxId}` : 'full'}), ${filteredTx.length} kept (≥ 2026-01-01)`)
+          const filteredTx = rawTx
+          console.log(`[teller] got ${rawTx.length} tx for ${acc.name} (start_date=${startDate})`)
 
           // Credit cards report charges as positive — flip sign so our convention
           // is consistent: negative = spending, positive = income/payment.
@@ -437,14 +432,10 @@ async function fetchAllTellerData(preFetchedAccounts = {}) {
             console.log(`[teller] ${acc.name}: ${newRows.length} new, ${updatedRows.length} updated`)
           }
 
-          // Save the most recent transaction ID for next incremental sync.
-          // Teller returns transactions newest-first, so rawTx[0] is the latest.
-          if (rawTx.length > 0) {
-            const updated = readTokens()
-            updated.last_tx_id = { ...(updated.last_tx_id || {}), [acc.id]: rawTx[0].id }
-            updated.synced_accounts = { ...(updated.synced_accounts || {}), [acc.id]: new Date().toISOString() }
-            saveTokens(updated)
-          }
+          // Update last sync timestamp for this account
+          const updated = readTokens()
+          updated.synced_accounts = { ...(updated.synced_accounts || {}), [acc.id]: new Date().toISOString() }
+          saveTokens(updated)
         } catch (txErr) {
           console.warn(`[teller] transactions failed for ${acc.id}:`, txErr.message)
         }
@@ -909,32 +900,52 @@ app.post('/api/snaptrade/connect', async (req, res) => {
   }
 })
 
-// Sync SnapTrade accounts → upsert into bank_accounts table (same as Teller)
-// Uses getAllUserHoldings which returns accounts + balances + positions in one call
+// Sync SnapTrade accounts → upsert into bank_accounts table
 app.post('/api/snaptrade/sync', async (req, res) => {
   try {
     const { userId, userSecret } = getSnaptradeUser()
     if (!supabase) return res.status(500).json({ error: 'Supabase not configured' })
 
-    const holdingsRes = await snapClient.accountInformation.getAllUserHoldings({ userId, userSecret })
-    const holdings = holdingsRes.data || []
+    // Build auth_id → brokerage name map as fallback for institution_name
+    const brokerageNames = {}
+    try {
+      const authRes = await snapClient.connections.listBrokerageAuthorizations({ userId, userSecret })
+      for (const auth of (authRes.data || [])) {
+        brokerageNames[auth.id] = auth.brokerage?.name || null
+      }
+    } catch (e) {
+      console.warn('[snaptrade] could not fetch brokerage authorizations:', e.message)
+    }
+
+    // listUserAccounts returns name, institution_name, and balance.total per account
+    const accountsRes = await snapClient.accountInformation.listUserAccounts({ userId, userSecret })
+    const accounts = accountsRes.data || []
 
     const upserts = []
-    for (const h of holdings) {
-      const acct    = h.account  || {}
-      const balance = h.balances?.[0]?.total ?? h.balances?.[0]?.cash ?? 0
+    for (const acct of accounts) {
+      // balance.total is { amount: number, currency: string }
+      const balance         = parseFloat(acct.balance?.total?.amount ?? acct.balance?.total ?? 0)
+      const institutionName = acct.institution_name
+        || brokerageNames[acct.brokerage_authorization]
+        || null
+
+      // Extract account type label from name: "First Last — Roth IRA Brokerage Account — 123456"
+      const nameParts   = (acct.name || '').split(' — ')
+      const accountType = nameParts.length >= 3 ? nameParts[nameParts.length - 2] : (acct.name || 'Investment')
+
+      console.log(`[snaptrade] "${institutionName}" / "${accountType}": $${balance}`)
 
       upserts.push({
         account_id:        `snap_${acct.id}`,
         enrollment_id:     null,
         account_name:      acct.name || 'Investment Account',
         type:              'investment',
-        subtype:           acct.account_type?.name || 'brokerage',
+        subtype:           accountType,
         category_group:    'investments',
         current_balance:   balance,
         available_balance: balance,
         last_four:         acct.number ? String(acct.number).slice(-4) : null,
-        institution_name:  acct.institution_name || null,
+        institution_name:  institutionName,
         last_synced_at:    new Date().toISOString(),
         source:            'snaptrade',
         snap_account_id:   acct.id,
@@ -946,7 +957,7 @@ app.post('/api/snaptrade/sync', async (req, res) => {
       if (error) throw error
     }
 
-    bustCache('finance_summary')
+    bustCache('finance:summary')
     console.log(`[snaptrade] synced ${upserts.length} accounts`)
     res.json({ synced: upserts.length, accounts: upserts.map(a => ({ id: a.account_id, name: a.account_name, balance: a.current_balance })) })
   } catch (err) {
@@ -973,7 +984,7 @@ app.delete('/api/snaptrade/disconnect', async (req, res) => {
     if (supabase) {
       const { error } = await supabase.from('bank_accounts').delete().eq('source', 'snaptrade')
       if (error) throw error
-      bustCache('finance_summary')
+      bustCache('finance:summary')
     }
     res.json({ success: true })
   } catch (err) {

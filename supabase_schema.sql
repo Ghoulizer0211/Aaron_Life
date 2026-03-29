@@ -129,3 +129,4 @@ alter table events             disable row level security;
 
 alter table bank_accounts add column if not exists source           text not null default 'teller';
 alter table bank_accounts add column if not exists snap_account_id  text;
+alter table bank_transactions add column if not exists note          text;

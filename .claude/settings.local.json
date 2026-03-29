@@ -14,7 +14,10 @@
       "WebFetch(domain:developer.ouraring.com)",
       "WebFetch(domain:python-ouraring.readthedocs.io)",
       "WebFetch(domain:github.com)",
-      "Bash(npm show:*)"
+      "Bash(npm show:*)",
+      "Bash(ls:*)",
+      "Bash(node -e \"const {Snaptrade} = require\\(''./node_modules/snaptrade-typescript-sdk''\\); const c = new Snaptrade\\({clientId:''x'',consumerKey:''y''}\\); console.log\\(Object.getOwnPropertyNames\\(Object.getPrototypeOf\\(Object.getPrototypeOf\\(c.accountInformation\\)\\)\\).filter\\(n=>n!==''constructor''\\)\\)\")",
+      "Bash(node --input-type=commonjs -e \"const {Snaptrade} = require\\(''./node_modules/snaptrade-typescript-sdk''\\); const c = new Snaptrade\\({clientId:''x'',consumerKey:''y''}\\); const proto = Object.getPrototypeOf\\(Object.getPrototypeOf\\(c.accountInformation\\)\\); console.log\\(Object.getOwnPropertyNames\\(proto\\).filter\\(n => n !== ''constructor''\\).join\\(''\\\\n''\\)\\)\")"
     ]
   }
 }
