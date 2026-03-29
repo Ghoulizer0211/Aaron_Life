@@ -1,8 +1,6 @@
 import { getSupabase } from './_lib/supabase.js'
 import { getTellerCreds, tellerFetch, mapTellerCategory, defaultCategory } from './_lib/teller.js'
 
-const sleep = (ms) => new Promise(r => setTimeout(r, ms))
-
 async function syncAllEnrollments(supabase, creds, preFetched = {}) {
   const { data: connections, error } = await supabase
     .from('bank_connections')
@@ -14,6 +12,7 @@ async function syncAllEnrollments(supabase, creds, preFetched = {}) {
   const { data: existingAccs } = await supabase.from('bank_accounts').select('account_id, category_group')
   for (const a of (existingAccs || [])) existingCategories[a.account_id] = a.category_group
 
+  const today = new Date().toISOString().slice(0, 10)
   const allAccounts = []
   const allTransactions = []
 
@@ -28,65 +27,80 @@ async function syncAllEnrollments(supabase, creds, preFetched = {}) {
         last_synced_at: new Date().toISOString(),
       }, { onConflict: 'enrollment_id' })
 
-      for (const acc of rawAccounts) {
-        let currentBalance = 0, availableBalance = 0
-        try {
-          const bal = await tellerFetch(`/accounts/${acc.id}/balances`, access_token, creds)
-          currentBalance   = parseFloat(bal.ledger    ?? bal.current  ?? 0)
-          availableBalance = parseFloat(bal.available ?? bal.ledger   ?? 0)
-        } catch (e) { console.warn(`[teller] balance failed ${acc.id}:`, e.message) }
+      // Fetch all balances and transactions in parallel across all accounts
+      const results = await Promise.allSettled(
+        rawAccounts.map(async (acc) => {
+          const [balResult, txResult] = await Promise.allSettled([
+            tellerFetch(`/accounts/${acc.id}/balances`, access_token, creds),
+            tellerFetch(`/accounts/${acc.id}/transactions`, access_token, creds),
+          ])
 
-        const stored = existingCategories[acc.id]
-        const category_group = (stored && !(stored === 'cash' && acc.type === 'credit'))
-          ? stored : defaultCategory(acc.type)
+          let currentBalance = 0, availableBalance = 0
+          if (balResult.status === 'fulfilled') {
+            const bal = balResult.value
+            currentBalance   = parseFloat(bal.ledger    ?? bal.current  ?? 0)
+            availableBalance = parseFloat(bal.available ?? bal.ledger   ?? 0)
+          } else {
+            console.warn(`[teller] balance failed ${acc.id}:`, balResult.reason?.message)
+          }
 
-        const accountObj = {
-          account_id: acc.id, enrollment_id, account_name: acc.name,
-          type: acc.type, subtype: acc.subtype || acc.type, category_group,
-          current_balance: currentBalance, available_balance: availableBalance,
-          last_four: acc.last_four, institution_name, last_synced_at: new Date().toISOString(),
-        }
+          const stored = existingCategories[acc.id]
+          const category_group = (stored && !(stored === 'cash' && acc.type === 'credit'))
+            ? stored : defaultCategory(acc.type)
+
+          const accountObj = {
+            account_id: acc.id, enrollment_id, account_name: acc.name,
+            type: acc.type, subtype: acc.subtype || acc.type, category_group,
+            current_balance: currentBalance, available_balance: availableBalance,
+            last_four: acc.last_four, institution_name, last_synced_at: new Date().toISOString(),
+          }
+
+          let txObjs = []
+          if (txResult.status === 'fulfilled') {
+            const isCreditCard = acc.type === 'credit' || acc.subtype === 'credit_card'
+            txObjs = txResult.value
+              .filter(tx => tx.date >= '2026-01-01')
+              .map(tx => ({
+                transaction_id: tx.id,
+                account_id:     tx.account_id,
+                date:           tx.date,
+                description:    tx.description,
+                amount:         isCreditCard ? -parseFloat(tx.amount) : parseFloat(tx.amount),
+                category:       mapTellerCategory(tx.details?.category),
+                pending:        tx.status === 'pending',
+                is_transfer:    tx.details?.category?.toLowerCase().includes('transfer') || false,
+              }))
+          } else {
+            console.warn(`[teller] transactions failed ${acc.id}:`, txResult.reason?.message)
+          }
+
+          return { accountObj, txObjs, accId: acc.id, currentBalance }
+        })
+      )
+
+      // Save all accounts and transactions to Supabase
+      for (const r of results) {
+        if (r.status !== 'fulfilled') continue
+        const { accountObj, txObjs, accId, currentBalance } = r.value
+
         allAccounts.push(accountObj)
         await supabase.from('bank_accounts').upsert(accountObj, { onConflict: 'account_id' })
-
-        const today = new Date().toISOString().slice(0, 10)
         await supabase.from('balance_snapshots').upsert(
-          { account_id: acc.id, balance: currentBalance, snapshot_date: today },
+          { account_id: accId, balance: currentBalance, snapshot_date: today },
           { onConflict: 'account_id,snapshot_date' }
         )
 
-        try {
-          const isCreditCard = acc.type === 'credit' || acc.subtype === 'credit_card'
-          const rawTx = await tellerFetch(`/accounts/${acc.id}/transactions`, access_token, creds)
-          const txObjs = rawTx
-            .filter(tx => tx.date >= '2026-01-01')
-            .map(tx => ({
-              transaction_id: tx.id,
-              account_id:     tx.account_id,
-              date:           tx.date,
-              description:    tx.description,
-              amount:         isCreditCard ? -parseFloat(tx.amount) : parseFloat(tx.amount),
-              category:       mapTellerCategory(tx.details?.category),
-              pending:        tx.status === 'pending',
-              is_transfer:    tx.details?.category?.toLowerCase().includes('transfer') || false,
-            }))
+        if (txObjs.length > 0) {
+          const { data: existing } = await supabase
+            .from('bank_transactions').select('transaction_id')
+            .in('transaction_id', txObjs.map(t => t.transaction_id))
+          const existingIds = new Set((existing || []).map(r => r.transaction_id))
+          const newRows     = txObjs.filter(t => !existingIds.has(t.transaction_id))
+          const updatedRows = txObjs.filter(t => existingIds.has(t.transaction_id)).map(({ category: _c, ...t }) => t)
+          if (newRows.length > 0)     await supabase.from('bank_transactions').insert(newRows)
+          if (updatedRows.length > 0) await supabase.from('bank_transactions').upsert(updatedRows, { onConflict: 'transaction_id' })
           allTransactions.push(...txObjs)
-
-          if (txObjs.length > 0) {
-            const { data: existing } = await supabase
-              .from('bank_transactions').select('transaction_id')
-              .in('transaction_id', txObjs.map(t => t.transaction_id))
-            const existingIds = new Set((existing || []).map(r => r.transaction_id))
-            const newRows     = txObjs.filter(t => !existingIds.has(t.transaction_id))
-            const updatedRows = txObjs
-              .filter(t => existingIds.has(t.transaction_id))
-              .map(({ category: _c, ...t }) => t)
-            if (newRows.length > 0)     await supabase.from('bank_transactions').insert(newRows)
-            if (updatedRows.length > 0) await supabase.from('bank_transactions').upsert(updatedRows, { onConflict: 'transaction_id' })
-          }
-        } catch (e) { console.warn(`[teller] transactions failed ${acc.id}:`, e.message) }
-
-        await sleep(1000)
+        }
       }
     } catch (e) { console.error(`[teller] enrollment ${enrollment_id} failed:`, e.message) }
   }

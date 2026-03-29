@@ -49,13 +49,24 @@ export default async function handler(req, res) {
     if (!user) return res.json({ success: true, accounts: 0 })
     const supabase = getSupabase()
     try {
-      const snap     = getSnapClient()
+      const snap = getSnapClient()
+
+      // Build authorization ID → brokerage name map
+      const authMap = {}
+      try {
+        const authRes = await snap.connections.listBrokerageAuthorizations({ userId: user.userId, userSecret: user.userSecret })
+        for (const auth of authRes.data || []) {
+          if (auth.id && auth.brokerage?.name) authMap[auth.id] = auth.brokerage.name
+        }
+      } catch { /* fallback */ }
+
       const response = await snap.accountInformation.getAllUserHoldings({ userId: user.userId, userSecret: user.userSecret })
       const holdings = response.data || []
       if (supabase && holdings.length > 0) {
         for (const item of holdings) {
           const acc = item.account
           if (!acc) continue
+          const institutionName = authMap[acc.brokerage_authorization] || acc.institution_name || 'SnapTrade'
           await supabase.from('bank_accounts').upsert({
             account_id:        `snap_${acc.id}`,
             enrollment_id:     null,
@@ -65,7 +76,7 @@ export default async function handler(req, res) {
             category_group:    'investments',
             current_balance:   parseFloat(item.totalValue?.amount ?? 0),
             available_balance: parseFloat(item.totalValue?.amount ?? 0),
-            institution_name:  acc.institution_name || 'SnapTrade',
+            institution_name:  institutionName,
             last_synced_at:    new Date().toISOString(),
           }, { onConflict: 'account_id' })
         }

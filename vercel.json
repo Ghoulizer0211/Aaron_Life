@@ -1,4 +1,7 @@
 {
+  "functions": {
+    "api/teller.js": { "maxDuration": 60 }
+  },
   "rewrites": [
     { "source": "/api/teller/:path*",    "destination": "/api/teller" },
     { "source": "/api/finance/:path*",   "destination": "/api/finance" },
