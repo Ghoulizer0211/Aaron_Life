@@ -46,7 +46,7 @@ export default async function handler(req, res) {
   // POST /api/snaptrade/sync
   if (sub === 'sync' && req.method === 'POST') {
     const user = await getSnapUser()
-    if (!user) return res.status(400).json({ error: 'SnapTrade not connected' })
+    if (!user) return res.json({ success: true, accounts: 0 })
     const supabase = getSupabase()
     try {
       const snap     = getSnapClient()
