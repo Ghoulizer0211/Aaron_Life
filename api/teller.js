@@ -27,9 +27,13 @@ async function syncAllEnrollments(supabase, creds, preFetched = {}) {
         last_synced_at: new Date().toISOString(),
       }, { onConflict: 'enrollment_id' })
 
-      // Fetch all balances and transactions in parallel across all accounts
-      const results = await Promise.allSettled(
-        rawAccounts.map(async (acc) => {
+      // Fetch in batches of 4 to stay under Teller's 10 req/s rate limit
+      // Each account makes 2 requests (balance + transactions) → 4 accounts = 8 req/s
+      const BATCH = 4
+      const results = []
+      for (let i = 0; i < rawAccounts.length; i += BATCH) {
+        const batch = rawAccounts.slice(i, i + BATCH)
+        const batchResults = await Promise.allSettled(batch.map(async (acc) => {
           const [balResult, txResult] = await Promise.allSettled([
             tellerFetch(`/accounts/${acc.id}/balances`, access_token, creds),
             tellerFetch(`/accounts/${acc.id}/transactions`, access_token, creds),
@@ -75,8 +79,9 @@ async function syncAllEnrollments(supabase, creds, preFetched = {}) {
           }
 
           return { accountObj, txObjs, accId: acc.id, currentBalance }
-        })
-      )
+        }))
+        results.push(...batchResults)
+      }
 
       // Save all accounts and transactions to Supabase
       for (const r of results) {
