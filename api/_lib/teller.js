@@ -4,9 +4,9 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms))
 
 /** Read Teller mTLS cert/key from base64 env vars */
 export function getTellerCreds() {
-  const certB64 = process.env.TELLER_CERT_BASE64 || process.env.TELLER_CERT_B64
-  const keyB64  = process.env.TELLER_KEY_BASE64  || process.env.TELLER_KEY_B64
-  if (!certB64 || !keyB64) throw new Error('TELLER_CERT_BASE64 / TELLER_KEY_BASE64 env vars not set')
+  const certB64 = process.env.TELLER_CERT_B64
+  const keyB64  = process.env.TELLER_KEY_B64
+  if (!certB64 || !keyB64) throw new Error('TELLER_CERT_B64 / TELLER_KEY_B64 env vars not set')
   return {
     cert: Buffer.from(certB64, 'base64').toString('utf8'),
     key:  Buffer.from(keyB64,  'base64').toString('utf8'),
