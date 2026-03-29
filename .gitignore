@@ -30,3 +30,4 @@ dist-ssr
 .env.production
 server/tokens.json
 teller/
+.vercel/
