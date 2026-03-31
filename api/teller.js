@@ -14,7 +14,7 @@ async function incrementalSync(supabase, creds) {
   if (!storedAccounts?.length) return { enrollments: [], accounts: [], transactions: [] }
 
   const tokenMap = Object.fromEntries(connections.map(c => [c.enrollment_id, c.access_token]))
-  const today    = new Date().toISOString().slice(0, 10)
+  const today    = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' })
   const allAccounts = [], allTransactions = []
 
   // Batch in groups of 4: each account = 2 requests (balance + transactions)

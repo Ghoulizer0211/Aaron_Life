@@ -42,8 +42,7 @@ function monthLabel(m) {
 }
 
 function currentMonth() {
-  const d = new Date()
-  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' }).slice(0, 7)
 }
 
 // ── Toast ─────────────────────────────────────────────────────────────────────
@@ -426,7 +425,7 @@ function detectSubscriptions(allTx) {
     if (months.size >= 3 && txs.length / months.size >= 3.5) frequency = 'weekly'
 
     // Flag if not charged this month (potentially cancelled or skipped)
-    const thisMonth = new Date().toISOString().slice(0, 7)
+    const thisMonth = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' }).slice(0, 7)
     const chargedThisMonth = months.has(thisMonth)
 
     subs.push({ merchant, amount: avgAmt, count: txs.length, months: months.size, lastCharged, category, frequency, chargedThisMonth, monthsArr })
@@ -453,11 +452,8 @@ function SummaryCard({ label, value, sub, accent, onClick, icon }) {
 
 function AccountRow({ account, onCategoryChange }) {
   const [editing, setEditing] = useState(false)
-  // Credit cards: show current_balance (what you owe), not available_balance (remaining credit limit)
   const isCredit = account.category_group === 'credit' || account.subtype === 'credit_card'
-  const bal = isCredit
-    ? (account.current_balance ?? account.balance ?? 0)
-    : (account.available_balance ?? account.current_balance ?? account.balance ?? 0)
+  const bal = account.current_balance ?? account.balance ?? 0
   return (
     <div className="card row-card">
       <div className="acc-left">
@@ -618,9 +614,7 @@ function MonthSelector({ month, onChange }) {
 function AccordionAccount({ account, transactions, onCategoryChange, onTxCategoryChange }) {
   const [open, setOpen] = useState(false)
   const isCredit = account.category_group === 'credit' || account.subtype === 'credit_card'
-  const bal = isCredit
-    ? (account.current_balance ?? account.balance ?? 0)
-    : (account.available_balance ?? account.current_balance ?? account.balance ?? 0)
+  const bal = account.current_balance ?? account.balance ?? 0
   const acctTx = [...transactions]
     .filter(t => t.account_id === (account.account_id || account.id))
     .sort((a, b) => (b.date || '').localeCompare(a.date || ''))

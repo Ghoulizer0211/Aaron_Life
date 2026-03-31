@@ -49,7 +49,7 @@ const TABS = [
 
 export default function BottomNav({ activeTab, onTabChange }) {
   const today = new Date().toLocaleDateString('en-US', {
-    weekday: 'long', month: 'long', day: 'numeric',
+    timeZone: 'America/Los_Angeles', weekday: 'long', month: 'long', day: 'numeric',
   })
 
   return (

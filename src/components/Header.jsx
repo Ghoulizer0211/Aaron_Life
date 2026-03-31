@@ -9,7 +9,7 @@ const TAB_TITLES = {
 
 export default function Header({ activeTab }) {
   const today = new Date().toLocaleDateString('en-US', {
-    weekday: 'short', month: 'short', day: 'numeric',
+    timeZone: 'America/Los_Angeles', weekday: 'short', month: 'short', day: 'numeric',
   })
 
   return (

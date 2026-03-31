@@ -22,8 +22,8 @@ export default async function handler(req, res) {
     const token = await getOuraToken()
     if (!token) return res.status(404).json({ error: 'Not connected' })
 
-    const today     = req.query.date || new Date().toISOString().slice(0, 10)
-    const yesterday = new Date(new Date(today + 'T12:00:00').getTime() - 86400000).toISOString().slice(0, 10)
+    const today     = req.query.date || new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' })
+    const yesterday = new Date(new Date(today + 'T12:00:00').getTime() - 86400000).toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' })
 
     try {
       const [readinessR, dailySleepR, sleepR, activityR] = await Promise.allSettled([
@@ -86,8 +86,8 @@ export default async function handler(req, res) {
     if (!token) return res.status(404).json({ error: 'Not connected' })
 
     const days  = Math.min(parseInt(req.query.days) || 30, 90)
-    const end   = new Date().toISOString().slice(0, 10)
-    const start = new Date(Date.now() - (days + 1) * 86400000).toISOString().slice(0, 10)
+    const end   = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' })
+    const start = new Date(Date.now() - (days + 1) * 86400000).toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' })
 
     try {
       const [readinessR, sleepR, activityR, sleepSessionsR] = await Promise.allSettled([

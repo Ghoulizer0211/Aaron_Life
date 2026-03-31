@@ -12,8 +12,7 @@ export default async function handler(req, res) {
 
   // GET /api/finance/summary
   if (sub === 'summary' && req.method === 'GET') {
-    const now   = new Date()
-    const month = req.query.month || `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+    const month = req.query.month || new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' }).slice(0, 7)
     const empty = { cash: { total: 0, accounts: [] }, credit: { total: 0, accounts: [] }, investments: { total: 0, accounts: [] }, spending: { total: 0, income: 0, expenses: 0, surplus: 0, beginning_balance: null, current_balance: 0, month } }
     try {
       const [accRes, txRes] = await Promise.all([

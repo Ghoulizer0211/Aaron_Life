@@ -331,7 +331,7 @@ async function fetchAllTellerData(preFetchedAccounts = {}) {
           sbLog('upsert account', error)
 
           // Save balance snapshot
-          const today = new Date().toISOString().slice(0, 10)
+          const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' })
           const { error: snapErr } = await supabase.from('balance_snapshots').upsert({
             account_id:    acc.id,
             balance:       currentBalance,
@@ -621,7 +621,7 @@ app.get('/api/finance/summary', async (req, res) => {
     const accounts     = accRes.data || []
     const transactions = txRes.data || []
 
-    // Cash = checking + savings — use current_balance (ledger) to match balance snapshots
+    // Cash = checking + savings — use current_balance (ledger)
     const cashAccounts  = accounts.filter(a => a.category_group === 'cash')
     const cashTotal     = cashAccounts.reduce((s, a) => s + (parseFloat(a.current_balance) || 0), 0)
 
@@ -1063,8 +1063,8 @@ app.get('/api/oura/today', async (req, res) => {
   const token = await getOuraToken()
   if (!token) return res.status(404).json({ error: 'Not connected' })
 
-  const today     = req.query.date || new Date().toISOString().slice(0, 10)
-  const yesterday = new Date(new Date(today + 'T12:00:00').getTime() - 86400000).toISOString().slice(0, 10)
+  const today     = req.query.date || new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' })
+  const yesterday = new Date(new Date(today + 'T12:00:00').getTime() - 86400000).toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' })
 
   try {
     const [readinessR, dailySleepR, sleepR, activityR] = await Promise.allSettled([
@@ -1082,10 +1082,10 @@ app.get('/api/oura/today', async (req, res) => {
     const mainSleep = sleepSessions.find(s => s.type === 'long_sleep')
       || sleepSessions[sleepSessions.length - 1] || null
 
-    // Check if gym workout logged today
+    // Check if workout logged today (new workout_logs table)
     let workout_today = false
     if (supabase) {
-      const { data: gw } = await supabase.from('gym_workouts').select('id').eq('date', today).neq('type', 'Rest').limit(1)
+      const { data: gw } = await supabase.from('workout_logs').select('id').eq('date', today).limit(1)
       workout_today = (gw || []).length > 0
     }
 
@@ -1144,8 +1144,8 @@ app.get('/api/oura/week', async (req, res) => {
   if (!token) return res.status(404).json({ error: 'Not connected' })
 
   const days  = Math.min(parseInt(req.query.days) || 30, 90)
-  const end   = new Date().toISOString().slice(0, 10)
-  const start = new Date(Date.now() - (days + 1) * 86400000).toISOString().slice(0, 10)
+  const end   = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' })
+  const start = new Date(Date.now() - (days + 1) * 86400000).toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' })
 
   try {
     const [readinessR, sleepR, activityR, sleepSessionsR] = await Promise.allSettled([
@@ -1184,32 +1184,181 @@ app.get('/api/oura/week', async (req, res) => {
   }
 })
 
-// ─── Gym Workouts ─────────────────────────────────────────────────────────────
+// ─── Gym Plans (structured gym system) ───────────────────────────────────────
 
-app.get('/api/gym/workouts', async (req, res) => {
+app.get('/api/gym/plans', async (req, res) => {
   if (!supabase) return res.json([])
-  const limit = Math.min(parseInt(req.query.limit) || 60, 200)
-  const { data, error } = await supabase.from('gym_workouts').select('*').order('date', { ascending: false }).limit(limit)
+  const { data: plans, error } = await supabase
+    .from('workout_plans').select('*').order('created_at', { ascending: true })
   if (error) return res.status(500).json({ error: error.message })
-  res.json(data || [])
+  const planIds = (plans || []).map(p => p.id)
+  if (!planIds.length) return res.json([])
+  const { data: days } = await supabase
+    .from('workout_days').select('*').in('plan_id', planIds).order('day_order')
+  const dayIds = (days || []).map(d => d.id)
+  const { data: exercises } = dayIds.length
+    ? await supabase.from('workout_exercises').select('*').in('day_id', dayIds).order('"order"')
+    : { data: [] }
+  const exByDay = {}
+  for (const ex of (exercises || [])) {
+    if (!exByDay[ex.day_id]) exByDay[ex.day_id] = []
+    exByDay[ex.day_id].push(ex)
+  }
+  const daysByPlan = {}
+  for (const d of (days || [])) {
+    if (!daysByPlan[d.plan_id]) daysByPlan[d.plan_id] = []
+    daysByPlan[d.plan_id].push({ ...d, exercises: exByDay[d.id] || [] })
+  }
+  res.json(plans.map(p => ({ ...p, days: daysByPlan[p.id] || [] })))
 })
 
-app.post('/api/gym/workouts', async (req, res) => {
+app.post('/api/gym/plans', async (req, res) => {
   if (!supabase) return res.status(500).json({ error: 'Supabase not configured' })
-  const { date, type, duration_minutes, intensity, notes, exercises } = req.body
-  if (!date || !type) return res.status(400).json({ error: 'date and type required' })
-  const { data, error } = await supabase.from('gym_workouts')
-    .insert({ date, type, duration_minutes: duration_minutes || null, intensity, notes: notes || null, exercises: exercises || [] })
+  const { name } = req.body || {}
+  if (!name) return res.status(400).json({ error: 'name required' })
+  const { data, error } = await supabase.from('workout_plans').insert({ name }).select().single()
+  if (error) return res.status(500).json({ error: error.message })
+  res.json({ ...data, days: [] })
+})
+
+app.patch('/api/gym/plans/:id', async (req, res) => {
+  if (!supabase) return res.status(500).json({ error: 'Supabase not configured' })
+  const { name, is_active } = req.body || {}
+  const update = {}
+  if (name !== undefined) update.name = name
+  if (is_active !== undefined) {
+    if (is_active) await supabase.from('workout_plans').update({ is_active: false }).neq('id', req.params.id)
+    update.is_active = is_active
+  }
+  const { error } = await supabase.from('workout_plans').update(update).eq('id', req.params.id)
+  if (error) return res.status(500).json({ error: error.message })
+  res.json({ success: true })
+})
+
+app.delete('/api/gym/plans/:id', async (req, res) => {
+  if (!supabase) return res.status(500).json({ error: 'Supabase not configured' })
+  const { error } = await supabase.from('workout_plans').delete().eq('id', req.params.id)
+  if (error) return res.status(500).json({ error: error.message })
+  res.json({ success: true })
+})
+
+app.post('/api/gym/plans/:planId/days', async (req, res) => {
+  if (!supabase) return res.status(500).json({ error: 'Supabase not configured' })
+  const { day_name, day_order } = req.body || {}
+  if (!day_name) return res.status(400).json({ error: 'day_name required' })
+  const { data, error } = await supabase.from('workout_days')
+    .insert({ plan_id: req.params.planId, day_name, day_order: day_order || 0 }).select().single()
+  if (error) return res.status(500).json({ error: error.message })
+  res.json({ ...data, exercises: [] })
+})
+
+app.patch('/api/gym/days/:id', async (req, res) => {
+  if (!supabase) return res.status(500).json({ error: 'Supabase not configured' })
+  const { day_name, day_order } = req.body || {}
+  const update = {}
+  if (day_name !== undefined) update.day_name = day_name
+  if (day_order !== undefined) update.day_order = day_order
+  const { error } = await supabase.from('workout_days').update(update).eq('id', req.params.id)
+  if (error) return res.status(500).json({ error: error.message })
+  res.json({ success: true })
+})
+
+app.delete('/api/gym/days/:id', async (req, res) => {
+  if (!supabase) return res.status(500).json({ error: 'Supabase not configured' })
+  const { error } = await supabase.from('workout_days').delete().eq('id', req.params.id)
+  if (error) return res.status(500).json({ error: error.message })
+  res.json({ success: true })
+})
+
+app.post('/api/gym/days/:dayId/exercises', async (req, res) => {
+  if (!supabase) return res.status(500).json({ error: 'Supabase not configured' })
+  const { exercise_name, target_sets, target_reps, notes, order } = req.body || {}
+  if (!exercise_name) return res.status(400).json({ error: 'exercise_name required' })
+  const { data, error } = await supabase.from('workout_exercises')
+    .insert({ day_id: req.params.dayId, exercise_name, target_sets: target_sets || null, target_reps: target_reps || null, notes: notes || null, order: order || 0 })
     .select().single()
   if (error) return res.status(500).json({ error: error.message })
   res.json(data)
 })
 
-app.delete('/api/gym/workouts/:id', async (req, res) => {
+app.patch('/api/gym/exercises/:id', async (req, res) => {
   if (!supabase) return res.status(500).json({ error: 'Supabase not configured' })
-  const { error } = await supabase.from('gym_workouts').delete().eq('id', req.params.id)
+  const { exercise_name, target_sets, target_reps, notes, order } = req.body || {}
+  const update = {}
+  if (exercise_name !== undefined) update.exercise_name = exercise_name
+  if (target_sets !== undefined) update.target_sets = target_sets
+  if (target_reps !== undefined) update.target_reps = target_reps
+  if (notes !== undefined) update.notes = notes
+  if (order !== undefined) update.order = order
+  const { error } = await supabase.from('workout_exercises').update(update).eq('id', req.params.id)
   if (error) return res.status(500).json({ error: error.message })
   res.json({ success: true })
+})
+
+app.delete('/api/gym/exercises/:id', async (req, res) => {
+  if (!supabase) return res.status(500).json({ error: 'Supabase not configured' })
+  const { error } = await supabase.from('workout_exercises').delete().eq('id', req.params.id)
+  if (error) return res.status(500).json({ error: error.message })
+  res.json({ success: true })
+})
+
+app.get('/api/gym/logs', async (req, res) => {
+  if (!supabase) return res.json([])
+  const limit = Math.min(parseInt(req.query.limit) || 30, 100)
+  const { data: logs, error } = await supabase
+    .from('workout_logs').select('*')
+    .order('date', { ascending: false })
+    .order('created_at', { ascending: false })
+    .limit(limit)
+  if (error) return res.status(500).json({ error: error.message })
+  const logIds = (logs || []).map(l => l.id)
+  if (!logIds.length) return res.json([])
+  const { data: exLogs } = await supabase.from('exercise_logs').select('*').in('log_id', logIds)
+  const exByLog = {}
+  for (const el of (exLogs || [])) {
+    if (!exByLog[el.log_id]) exByLog[el.log_id] = []
+    exByLog[el.log_id].push(el)
+  }
+  res.json(logs.map(l => ({ ...l, exercises: exByLog[l.id] || [] })))
+})
+
+app.post('/api/gym/logs', async (req, res) => {
+  if (!supabase) return res.status(500).json({ error: 'Supabase not configured' })
+  const { date, plan_id, plan_name, day_id, day_name, notes, exercises } = req.body || {}
+  if (!date) return res.status(400).json({ error: 'date required' })
+  const { data: log, error } = await supabase.from('workout_logs')
+    .insert({ date, plan_id: plan_id || null, plan_name: plan_name || null, day_id: day_id || null, day_name: day_name || null, notes: notes || null })
+    .select().single()
+  if (error) return res.status(500).json({ error: error.message })
+  if (exercises && exercises.length > 0) {
+    const rows = exercises.map(ex => ({
+      log_id: log.id, exercise_name: ex.exercise_name,
+      sets_data: ex.sets_data || [], skipped: ex.skipped || false, notes: ex.notes || null,
+    }))
+    const { error: exErr } = await supabase.from('exercise_logs').insert(rows)
+    if (exErr) return res.status(500).json({ error: exErr.message })
+  }
+  res.json({ success: true, id: log.id })
+})
+
+app.delete('/api/gym/logs/:id', async (req, res) => {
+  if (!supabase) return res.status(500).json({ error: 'Supabase not configured' })
+  const { error } = await supabase.from('workout_logs').delete().eq('id', req.params.id)
+  if (error) return res.status(500).json({ error: error.message })
+  res.json({ success: true })
+})
+
+app.get('/api/gym/last-performance/:dayId', async (req, res) => {
+  if (!supabase) return res.json({})
+  const { data: lastLog } = await supabase
+    .from('workout_logs').select('id').eq('day_id', req.params.dayId)
+    .order('date', { ascending: false }).limit(1).maybeSingle()
+  if (!lastLog) return res.json({})
+  const { data: exLogs } = await supabase
+    .from('exercise_logs').select('*').eq('log_id', lastLog.id).eq('skipped', false)
+  const result = {}
+  for (const el of (exLogs || [])) result[el.exercise_name] = el.sets_data || []
+  res.json(result)
 })
 
 // ─── Security (PIN + Biometric) ───────────────────────────────────────────────

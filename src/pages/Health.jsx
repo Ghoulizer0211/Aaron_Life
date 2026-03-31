@@ -1,16 +1,16 @@
-import { useState, useEffect, useCallback } from 'react'
+﻿import { useState, useEffect, useCallback, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import './Page.css'
 import './Health.css'
 
-// ── Date helpers ──────────────────────────────────────────────────────────────
+// â”€â”€ Date helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-function todayStr() { return new Date().toISOString().slice(0, 10) }
+function todayStr() { return new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' }) }
 
 function offsetDate(dateStr, days) {
   const d = new Date(dateStr + 'T12:00:00')
   d.setDate(d.getDate() + days)
-  return d.toISOString().slice(0, 10)
+  return d.toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' })
 }
 
 function fmtDateLabel(dateStr) {
@@ -32,10 +32,10 @@ function getWeekStart(refDate) {
   const day = d.getDay()
   const diff = day === 0 ? 6 : day - 1
   d.setDate(d.getDate() - diff)
-  return d.toISOString().slice(0, 10)
+  return d.toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' })
 }
 
-// ── Score helpers ─────────────────────────────────────────────────────────────
+// â”€â”€ Score helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function scoreColor(score) {
   if (score == null) return '#444'
@@ -68,44 +68,24 @@ function sleepInsight(hours, score) {
   return 'Decent sleep. Aim for 7-9 hours consistently.'
 }
 
-// ── Gym helpers ───────────────────────────────────────────────────────────────
-
-const WORKOUT_TYPES = ['Push', 'Pull', 'Legs', 'Full Body', 'Cardio', 'Rest']
-const INTENSITY_OPTS = ['Light', 'Moderate', 'Heavy']
-
-function calcStreak(workouts) {
+function calcStreakFromLogs(logs) {
   let streak = 0
   let d = todayStr()
   for (let i = 0; i < 90; i++) {
-    const has = workouts.some(w => w.date === d && w.type !== 'Rest')
+    const has = (logs || []).some(l => l.date === d)
     if (has) { streak++; d = offsetDate(d, -1) }
-    else if (i === 0) { d = offsetDate(d, -1) }  // today not yet logged, check yesterday
+    else if (i === 0) { d = offsetDate(d, -1) }
     else break
   }
   return streak
 }
 
-function calcWeekFreq(workouts) {
+function calcWeekFreqFromLogs(logs) {
   const start = getWeekStart()
-  return workouts.filter(w => w.date >= start && w.date <= todayStr() && w.type !== 'Rest').length
+  return (logs || []).filter(l => l.date >= start && l.date <= todayStr()).length
 }
 
-function calcPRs(workouts) {
-  const prs = {}
-  for (const w of workouts) {
-    for (const ex of (w.exercises || [])) {
-      const name = (ex.name || '').trim()
-      if (!name) continue
-      for (const set of (ex.sets || [])) {
-        const wt = parseFloat(set.weight) || 0
-        if (wt > 0 && (!prs[name] || wt > prs[name])) prs[name] = wt
-      }
-    }
-  }
-  return Object.entries(prs).sort((a, b) => a[0].localeCompare(b[0]))
-}
-
-// ── Data hooks ────────────────────────────────────────────────────────────────
+// â”€â”€ Data hooks â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function useOuraToday(linked, date) {
   const cacheKey = `aaron_health_${date}`
@@ -154,62 +134,50 @@ function useOuraWeek(linked) {
   return data
 }
 
-function useGymData() {
-  const [workouts, setWorkouts] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('aaron_gym_workouts') || '[]') } catch { return [] }
-  })
-  const [saving, setSaving] = useState(false)
-
-  const load = useCallback(async () => {
-    try {
-      const res  = await fetch('/api/gym/workouts?limit=90')
-      const json = await res.json()
-      if (!json.error && Array.isArray(json)) {
-        setWorkouts(json)
-        localStorage.setItem('aaron_gym_workouts', JSON.stringify(json))
-      }
-    } catch { /* server offline */ }
-  }, [])
-
-  useEffect(() => { load() }, [load])
-
-  const addWorkout = async (workout) => {
-    setSaving(true)
-    try {
-      const res  = await fetch('/api/gym/workouts', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(workout),
-      })
-      const json = await res.json()
-      if (json.error) throw new Error(json.error)
-      await load()
-      return true
-    } catch (e) { return e.message || 'Save failed' }
-    finally { setSaving(false) }
-  }
-
-  const deleteWorkout = async (id) => {
-    try {
-      await fetch(`/api/gym/workouts/${id}`, { method: 'DELETE' })
-      await load()
-    } catch { /* ignore */ }
-  }
-
-  return { workouts, saving, addWorkout, deleteWorkout, refetch: load }
-}
 
 function usePlans() {
-  const [plans, setPlans] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('aaron_gym_plans') || '[]') } catch { return [] }
-  })
-  const save        = (list) => { setPlans(list); localStorage.setItem('aaron_gym_plans', JSON.stringify(list)) }
-  const addPlan    = (plan) => save([...plans, { ...plan, id: Date.now().toString() }])
-  const updatePlan = (id, plan) => save(plans.map(p => p.id === id ? { ...plan, id } : p))
-  const deletePlan = (id) => save(plans.filter(p => p.id !== id))
-  return { plans, addPlan, updatePlan, deletePlan }
+  const [plans, setPlans] = useState([])
+  const [loading, setLoading] = useState(false)
+  const load = useCallback(async () => {
+    setLoading(true)
+    try {
+      const res = await fetch('/api/gym/plans')
+      const json = await res.json()
+      if (Array.isArray(json)) setPlans(json)
+    } catch {}
+    finally { setLoading(false) }
+  }, [])
+  useEffect(() => { load() }, [load])
+  return { plans, loading, refetch: load }
 }
 
-// ── SVG Components ────────────────────────────────────────────────────────────
+function useWorkoutLogs() {
+  const [logs, setLogs] = useState([])
+  const load = useCallback(async () => {
+    try {
+      const res = await fetch('/api/gym/logs?limit=60')
+      const json = await res.json()
+      if (Array.isArray(json)) setLogs(json)
+    } catch {}
+  }, [])
+  useEffect(() => { load() }, [load])
+  return { logs, refetch: load }
+}
+
+function useLastPerf(dayId) {
+  const [data, setData] = useState(null)
+  useEffect(() => {
+    if (!dayId) return
+    setData(null)
+    fetch(`/api/gym/last-performance/${dayId}`)
+      .then(r => r.json())
+      .then(j => { if (!j.error) setData(j) })
+      .catch(() => {})
+  }, [dayId])
+  return data
+}
+
+// â”€â”€ SVG Components â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function ScoreRing({ score, color, size = 88, strokeWidth = 7 }) {
   const r    = (size - strokeWidth * 2) / 2
@@ -255,7 +223,7 @@ function BarChart({ items, height = 56 }) {
   )
 }
 
-// ── Tab bar ───────────────────────────────────────────────────────────────────
+// â”€â”€ Tab bar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const TABS = [
   { id: 'today',    label: 'Today' },
@@ -277,7 +245,7 @@ function HealthTabs({ tab, setTab }) {
   )
 }
 
-// ── Date nav ──────────────────────────────────────────────────────────────────
+// â”€â”€ Date nav â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function DateNav({ date, setDate, onSync, syncing }) {
   return (
@@ -303,13 +271,12 @@ function DateNav({ date, setDate, onSync, syncing }) {
   )
 }
 
-// ── TODAY TAB ─────────────────────────────────────────────────────────────────
+// â”€â”€ TODAY TAB â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-function TodayTab({ oura, gymData, date, setDate }) {
+function TodayTab({ oura, logs, date, setDate }) {
   const { data, loading, error, refetch } = oura
-  const { workouts } = gymData
   const { readiness, sleep, activity, workout_today } = data || {}
-  const streak = calcStreak(workouts)
+  const streak = calcStreakFromLogs(logs)
   const rColor = scoreColor(readiness?.score)
 
   return (
@@ -375,7 +342,7 @@ function MetricTile({ label, value, sub, color }) {
   )
 }
 
-// ── SLEEP TAB ─────────────────────────────────────────────────────────────────
+// â”€â”€ SLEEP TAB â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function SleepTab({ oura, weekData, date, setDate }) {
   const { data, loading, refetch } = oura
@@ -492,443 +459,896 @@ function SleepTab({ oura, weekData, date, setDate }) {
   )
 }
 
-// ── GYM TAB ───────────────────────────────────────────────────────────────────
+// â”€â”€ GYM TAB â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-function AddWorkoutModal({ onSave, onClose, saving, initialData, title = 'Log Workout' }) {
-  const [type,      setType]      = useState(initialData?.type      || 'Push')
-  const [duration,  setDuration]  = useState(initialData?.duration  ? String(initialData.duration) : '')
-  const [intensity, setIntensity] = useState(initialData?.intensity || 'Moderate')
-  const [notes,     setNotes]     = useState('')
-  const [exercises, setExercises] = useState(() => JSON.parse(JSON.stringify(initialData?.exercises || [])))
-  const [saveErr,   setSaveErr]   = useState(null)
+
+
+// Custom dark-themed dropdown for mini calendar
+function CalPicker({ value, options, onChange }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef(null)
+  const selected = options.find(o => o.value === value)
 
   useEffect(() => {
-    const y = window.scrollY
-    document.body.style.position = 'fixed'
-    document.body.style.top = `-${y}px`
-    document.body.style.width = '100%'
-    return () => {
-      document.body.style.position = ''
-      document.body.style.top = ''
-      document.body.style.width = ''
-      window.scrollTo(0, y)
-    }
-  }, [])
+    if (!open) return
+    const close = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
+    document.addEventListener('pointerdown', close)
+    return () => document.removeEventListener('pointerdown', close)
+  }, [open])
 
-  const addExercise = () => setExercises(e => [...e, { name: '', sets: [{ reps: '', weight: '' }] }])
-  const removeEx    = i  => setExercises(e => e.filter((_, j) => j !== i))
-  const updateEx    = (i, val) => setExercises(e => e.map((ex, j) => j === i ? { ...ex, name: val } : ex))
-  const addSet      = i  => setExercises(e => e.map((ex, j) => j === i ? { ...ex, sets: [...ex.sets, { reps: '', weight: '' }] } : ex))
-  const removeSet   = (ei, si) => setExercises(e => e.map((ex, j) => j === ei ? { ...ex, sets: ex.sets.filter((_, k) => k !== si) } : ex))
-  const updateSet   = (ei, si, field, val) => setExercises(e => e.map((ex, j) =>
-    j === ei ? { ...ex, sets: ex.sets.map((s, k) => k === si ? { ...s, [field]: val } : s) } : ex
-  ))
-
-  const handleSave = async () => {
-    setSaveErr(null)
-    const result = await onSave({
-      date:             todayStr(),
-      type,
-      duration_minutes: parseInt(duration) || null,
-      intensity,
-      notes:            notes.trim() || null,
-      exercises:        exercises.filter(e => e.name.trim()),
-    })
-    if (result !== true) setSaveErr(result || 'Save failed')
-  }
-
-  return createPortal(
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-sheet" onClick={e => e.stopPropagation()}>
-        <div className="modal-handle" />
-        <div className="modal-header">
-          <span className="modal-title">{title}</span>
-          <button className="modal-close" onClick={onClose}>✕</button>
+  return (
+    <div ref={ref} className="calpick">
+      <button className="calpick-btn" onClick={() => setOpen(o => !o)}>
+        <span>{selected?.label}</span>
+        <span className="calpick-caret">▾</span>
+      </button>
+      {open && (
+        <div className="calpick-list">
+          {options.map(o => (
+            <button key={o.value}
+              className={`calpick-item${o.value === value ? ' calpick-item--on' : ''}${o.disabled ? ' calpick-item--off' : ''}`}
+              disabled={o.disabled}
+              onClick={() => { onChange(o.value); setOpen(false) }}>
+              {o.label}
+            </button>
+          ))}
         </div>
-        <div className="modal-body">
-
-          {/* Type */}
-          <div className="form-group">
-            <label className="form-label">Type</label>
-            <div className="pill-row">
-              {WORKOUT_TYPES.map(t => (
-                <button key={t} className={`pill ${type === t ? 'pill--active' : ''}`} onClick={() => setType(t)}>{t}</button>
-              ))}
-            </div>
-          </div>
-
-          {type !== 'Rest' && (
-            <>
-              {/* Intensity */}
-              <div className="form-group">
-                <label className="form-label">Intensity</label>
-                <div className="pill-row">
-                  {INTENSITY_OPTS.map(opt => (
-                    <button key={opt} className={`pill ${intensity === opt ? 'pill--active' : ''}`} onClick={() => setIntensity(opt)}>{opt}</button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Duration */}
-              <div className="form-group">
-                <label className="form-label">Duration (min)</label>
-                <input className="form-input" type="number" placeholder="60" value={duration} onChange={e => setDuration(e.target.value)} />
-              </div>
-
-              {/* Exercises */}
-              <div className="form-group">
-                <label className="form-label">Exercises</label>
-                {exercises.map((ex, ei) => (
-                  <div key={ei} className="exercise-block">
-                    <div className="ex-header">
-                      <input className="form-input ex-name" placeholder="Exercise name" value={ex.name}
-                        onChange={e => updateEx(ei, e.target.value)} />
-                      <button className="ex-remove" onClick={() => removeEx(ei)}>✕</button>
-                    </div>
-                    {ex.sets.map((s, si) => (
-                      <div key={si} className="set-row">
-                        <input className="form-input set-input" type="number" placeholder="Reps" value={s.reps}
-                          onChange={e => updateSet(ei, si, 'reps', e.target.value)} />
-                        <input className="form-input set-input" type="number" placeholder="lbs" value={s.weight}
-                          onChange={e => updateSet(ei, si, 'weight', e.target.value)} />
-                        {ex.sets.length > 1 && (
-                          <button className="ex-remove" onClick={() => removeSet(ei, si)}>✕</button>
-                        )}
-                      </div>
-                    ))}
-                    <button className="add-set-btn" onClick={() => addSet(ei)}>+ Add Set</button>
-                  </div>
-                ))}
-                <button className="add-ex-btn" onClick={addExercise}>+ Add Exercise</button>
-              </div>
-            </>
-          )}
-
-          {/* Notes */}
-          <div className="form-group">
-            <label className="form-label">Notes</label>
-            <textarea className="form-input form-textarea" placeholder="Optional notes…" value={notes} onChange={e => setNotes(e.target.value)} />
-          </div>
-
-          {saveErr && <p className="form-error">{saveErr}</p>}
-
-          <button className="connect-btn health-connect-btn" onClick={handleSave} disabled={saving}>
-            {saving ? 'Saving…' : 'Save Workout'}
-          </button>
-        </div>
-      </div>
-    </div>,
-    document.body
+      )}
+    </div>
   )
 }
 
-function WorkoutCard({ w, onDelete }) {
-  const [open, setOpen] = useState(false)
-  const typeColor = w.type === 'Rest' ? '#555' : w.intensity === 'Heavy' ? '#ff3864' : w.intensity === 'Light' ? '#00ff9d' : '#00e5ff'
+// WeekStrip — navigable week strip with optional month calendar dropdown
+function WeekStrip({ logs, date, onDateChange }) {
+  const today      = todayStr()
+  const [expanded,       setExpanded]       = useState(false)
+  const [calMonthOffset, setCalMonthOffset] = useState(0)
+
+  // Derive weekOffset from the selected date
+  const baseStart    = getWeekStart(today)
+  const selWeekStart = getWeekStart(date)
+  const weekOffset   = Math.round((new Date(selWeekStart + 'T12:00:00') - new Date(baseStart + 'T12:00:00')) / (7 * 86400000))
+
+  const weekStart = selWeekStart
+  const weekDates = Array.from({ length: 7 }, (_, i) => offsetDate(weekStart, i))
+  const dayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+
+  // Week strip header label — always show month of selected date
+  const monthLabel = new Date(date + 'T12:00:00').toLocaleDateString('en-US', { timeZone: 'America/Los_Angeles', month: 'long', year: 'numeric' })
+
+  // Mini calendar: month derived from selected date + calMonthOffset
+  const calBase  = new Date(date + 'T12:00:00')
+  calBase.setDate(1)
+  calBase.setMonth(calBase.getMonth() + calMonthOffset)
+  const calYear  = calBase.getFullYear()
+  const calMonth = calBase.getMonth()
+  const calMonthLabel = calBase.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+
+  const firstOfMonth = new Date(calYear, calMonth, 1)
+  const startDow     = firstOfMonth.getDay()
+  const gridStart    = new Date(firstOfMonth)
+  gridStart.setDate(firstOfMonth.getDate() - (startDow === 0 ? 6 : startDow - 1))
+  const calDays = Array.from({ length: 42 }, (_, i) => {
+    const d = new Date(gridStart)
+    d.setDate(gridStart.getDate() + i)
+    return d.toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' })
+  }).filter((d, i) => {
+    // Drop trailing rows that are entirely outside the current month
+    if (i < 35) return true
+    return new Date(d + 'T12:00:00').getMonth() === calMonth
+  })
+
+  const todayDate = new Date(today + 'T12:00:00')
+  const maxYear   = todayDate.getFullYear()
+  const minYear   = maxYear - 5
+
+  const jumpToDate = (dateStr) => {
+    if (dateStr > today) return
+    onDateChange(dateStr)
+    setCalMonthOffset(0)
+    setExpanded(false)
+  }
+
+  const setCalMonthYear = (y, m) => {
+    const baseDateObj = new Date(date + 'T12:00:00')
+    baseDateObj.setDate(1)
+    setCalMonthOffset((y - baseDateObj.getFullYear()) * 12 + (m - baseDateObj.getMonth()))
+  }
 
   return (
-    <div className="workout-card card">
-      <button className="wc-header" onClick={() => setOpen(o => !o)}>
-        <div className="wc-left">
-          <span className="wc-type" style={{ color: typeColor }}>{w.type}</span>
-          <span className="wc-date">{fmtShortDate(w.date)}{w.duration_minutes ? ` · ${w.duration_minutes}min` : ''}</span>
+    <div className="gym-cal-wrap">
+      {/* Header row: prev / month label (tap to expand) / next / today */}
+      <div className="gym-cal-header">
+        <button className="hnav-btn" onClick={() => onDateChange(offsetDate(date, -7))}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><polyline points="15 18 9 12 15 6"/></svg>
+        </button>
+        <button className="gym-cal-month" onClick={() => setExpanded(e => !e)}>
+          {monthLabel} {expanded ? '▲' : '▼'}
+        </button>
+        <button className="hnav-btn" onClick={() => onDateChange(offsetDate(date, +7))} disabled={weekOffset >= 0 || offsetDate(date, +7) > today}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><polyline points="9 18 15 12 9 6"/></svg>
+        </button>
+        {date !== today && (
+          <button className="hnav-today" onClick={() => onDateChange(today)}>Today</button>
+        )}
+      </div>
+
+      {/* Week dots */}
+      <div className="card week-grid-card">
+        {weekDates.map((d, i) => {
+          const log     = logs.find(l => l.date === d)
+          const isToday = d === today
+          const isPast  = d < today
+          const isRest     = log?.day_name === 'Rest'
+          const isSelected = d === date
+          const dotCls     = log ? (isRest ? 'wgd-rest' : 'wgd-done') : (isPast ? 'wgd-miss' : 'wgd-future')
+          return (
+            <div key={d} className={`wg-day${isToday ? ' wg-today' : ''}${isSelected ? ' wg-selected' : ''}`}
+              onClick={() => d <= today && onDateChange(d)}
+              style={{ cursor: d <= today ? 'pointer' : 'default', opacity: d > today ? 0.35 : 1 }}>
+              <span className="wgd-label">{dayLabels[i]}</span>
+              <div className={`wgd-dot ${dotCls}`}>
+                {log ? (isRest ? '😴' : '✓') : ''}
+              </div>
+              <span className="wgd-date">{parseInt(d.slice(8))}</span>
+            </div>
+          )
+        })}
+      </div>
+
+      {/* Expanded month calendar */}
+      {expanded && (
+        <div className="gym-mini-cal">
+          <div className="gmc-pickers">
+            <CalPicker value={calMonth}
+              options={['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'].map((m, i) => ({
+                value: i, label: m, disabled: calYear === maxYear && i > todayDate.getMonth()
+              }))}
+              onChange={m => setCalMonthYear(calYear, m)} />
+            <CalPicker value={calYear}
+              options={Array.from({ length: maxYear - minYear + 1 }, (_, i) => ({ value: minYear + i, label: String(minYear + i) }))}
+              onChange={y => setCalMonthYear(y, calMonth)} />
+          </div>
+          <div className="gmc-dow-row">
+            {['M','T','W','T','F','S','S'].map((l, i) => <span key={i} className="gmc-dow">{l}</span>)}
+          </div>
+          <div className="gmc-grid">
+            {calDays.map(d => {
+              const isCurMon = new Date(d + 'T12:00:00').getMonth() === calMonth
+              if (!isCurMon) return <span key={d} className="gmc-day gmc-empty" />
+              const log      = logs.find(l => l.date === d)
+              const isToday  = d === today
+              const inWeek   = weekDates.includes(d)
+              const isRest   = log?.day_name === 'Rest'
+              const isFuture = d > today
+              return (
+                <button key={d}
+                  className={`gmc-day${isToday ? ' gmc-today' : ''}${inWeek ? ' gmc-in-week' : ''}${isFuture ? ' gmc-future' : ''}`}
+                  onClick={() => jumpToDate(d)} disabled={isFuture}>
+                  <span className="gmc-num">{new Date(d + 'T12:00:00').getDate()}</span>
+                  {log && <span className={`gmc-dot${isRest ? ' gmc-dot--rest' : ''}`} />}
+                </button>
+              )
+            })}
+          </div>
         </div>
-        <div className="wc-right">
-          {w.intensity && w.type !== 'Rest' && <span className="wc-intensity">{w.intensity}</span>}
-          <span className="wc-chevron">{open ? '▲' : '▼'}</span>
+      )}
+    </div>
+  )
+}
+
+// LoggedWorkout — shows an existing log for a date
+function LoggedWorkout({ log, onDelete, onEdit }) {
+  const [open, setOpen] = useState(false)
+  const logged  = (log.exercises || []).filter(e => !e.skipped)
+  const skipped = (log.exercises || []).filter(e => e.skipped)
+  const isRest  = log.day_name === 'Rest' && logged.length === 0
+  return (
+    <div className="card gym-logged">
+      <button className="gym-logged-header" onClick={() => setOpen(o => !o)}>
+        <div>
+          <span className="gym-logged-title">{isRest ? '😴 Rest Day' : (log.day_name || 'Workout')}</span>
+          {log.plan_name && <span className="gym-logged-sub"> · {log.plan_name}</span>}
         </div>
+        <span className="wc-chevron">{open ? '▲' : '▼'}</span>
       </button>
       {open && (
-        <div className="wc-body">
-          {(w.exercises || []).map((ex, i) => (
+        <div className="gym-logged-body">
+          <div className="wc-divider" />
+          {isRest && <p className="health-empty" style={{ margin: 0 }}>Rest day logged.</p>}
+          {logged.map((ex, i) => (
             <div key={i} className="wc-exercise">
-              <span className="wce-name">{ex.name}</span>
+              <span className="wce-name">{ex.exercise_name}</span>
               <span className="wce-sets">
-                {(ex.sets || []).map((s, j) => (
-                  <span key={j} className="wce-set">{s.reps}×{s.weight}lbs</span>
+                {(ex.sets_data || []).map((s, j) => (
+                  <span key={j} className="wce-set">{s.weight}×{s.reps}</span>
                 ))}
               </span>
             </div>
           ))}
-          {w.notes && <p className="wc-notes">{w.notes}</p>}
-          <button className="wc-delete" onClick={() => onDelete(w.id)}>Delete</button>
+          {skipped.length > 0 && (
+            <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '6px 0 0' }}>
+              Skipped: {skipped.map(e => e.exercise_name).join(', ')}
+            </p>
+          )}
+          {log.notes && <p className="wc-notes">{log.notes}</p>}
+          <div className="wc-actions">
+            <button className="wc-edit" onClick={onEdit}>Edit</button>
+            <button className="wc-delete" onClick={() => onDelete(log.id)}>Delete</button>
+          </div>
         </div>
       )}
     </div>
   )
 }
 
-function PlanChip({ plan, onLog, onEdit }) {
-  return (
-    <div className="plan-chip">
-      <button className="pc-log" onClick={onLog}>
-        <div className="pc-left">
-          <span className="pc-name">{plan.name}</span>
-          <span className="pc-meta">{plan.type}{plan.duration ? ` · ${plan.duration}min` : ''}{plan.intensity ? ` · ${plan.intensity}` : ''}</span>
-        </div>
-        <span className="pc-arrow">▶</span>
-      </button>
-      <button className="pc-edit" onClick={onEdit} title="Edit plan">✎</button>
-    </div>
-  )
-}
+// ExerciseCard — collapsible 4-column grid (prev lbs | prev reps | new lbs | new reps)
+function ExerciseCard({ exercise, lastPerf, state, onChange }) {
+  const [open, setOpen] = useState(false)
+  const lastSets = (lastPerf || []).filter(s => s.weight || s.reps)
 
-function CreatePlanModal({ onClose, onSave, onDelete, initialPlan }) {
-  const [name,      setName]      = useState(initialPlan?.name      || '')
-  const [type,      setType]      = useState(initialPlan?.type      || 'Push')
-  const [duration,  setDuration]  = useState(initialPlan?.duration  ? String(initialPlan.duration) : '')
-  const [intensity, setIntensity] = useState(initialPlan?.intensity || 'Moderate')
-  const [exercises, setExercises] = useState(() => JSON.parse(JSON.stringify(initialPlan?.exercises || [])))
-  const [saveErr,   setSaveErr]   = useState(null)
-
+  // Auto-init sets when opening
   useEffect(() => {
-    const y = window.scrollY
-    document.body.style.position = 'fixed'
-    document.body.style.top = `-${y}px`
-    document.body.style.width = '100%'
-    return () => {
-      document.body.style.position = ''
-      document.body.style.top = ''
-      document.body.style.width = ''
-      window.scrollTo(0, y)
-    }
-  }, [])
+    if (!open || state !== null) return
+    const initSets = lastSets.length > 0
+      ? lastSets.map(() => ({ weight: '', reps: '' }))
+      : [{ weight: '', reps: '' }]
+    onChange({ action: 'edit', sets: initSets })
+  }, [open])
 
-  const addExercise = () => setExercises(e => [...e, { name: '', sets: [{ reps: '', weight: '' }] }])
-  const removeEx    = i  => setExercises(e => e.filter((_, j) => j !== i))
-  const updateEx    = (i, val) => setExercises(e => e.map((ex, j) => j === i ? { ...ex, name: val } : ex))
-  const addSet      = i  => setExercises(e => e.map((ex, j) => j === i ? { ...ex, sets: [...ex.sets, { reps: '', weight: '' }] } : ex))
-  const removeSet   = (ei, si) => setExercises(e => e.map((ex, j) => j === ei ? { ...ex, sets: ex.sets.filter((_, k) => k !== si) } : ex))
-  const updateSet   = (ei, si, field, val) => setExercises(e => e.map((ex, j) =>
-    j === ei ? { ...ex, sets: ex.sets.map((s, k) => k === si ? { ...s, [field]: val } : s) } : ex
-  ))
+  const sets      = state?.sets || []
+  const isSkipped = state?.action === 'skip'
+  const hasData   = sets.some(s => s.weight || s.reps)
 
-  const handleSave = () => {
-    setSaveErr(null)
-    if (!name.trim()) { setSaveErr('Plan name is required'); return }
-    onSave({
-      name:      name.trim(),
-      type,
-      duration:  parseInt(duration) || null,
-      intensity,
-      exercises: exercises.filter(e => e.name.trim()),
-    })
+  const updateSet = (i, field, val) => {
+    const next = [...sets]; next[i] = { ...next[i], [field]: val }
+    onChange({ action: 'edit', sets: next })
   }
+  const addSet    = () => onChange({ action: 'edit', sets: [...sets, { weight: '', reps: '' }] })
+  const removeSet = (i) => onChange({ action: 'edit', sets: sets.filter((_, j) => j !== i) })
 
-  return createPortal(
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-sheet" onClick={e => e.stopPropagation()}>
-        <div className="modal-handle" />
-        <div className="modal-header">
-          <span className="modal-title">{initialPlan ? 'Edit Plan' : 'Create Plan'}</span>
-          <button className="modal-close" onClick={onClose}>✕</button>
+  const statusBadge = isSkipped ? <span className="ec-badge ec-badge--skip">Skipped</span>
+                    : hasData   ? <span className="ec-badge ec-badge--done">✓</span>
+                    : null
+
+  return (
+    <div className={`ex-card card${hasData ? ' ex-card--done' : ''}`}>
+      <button className="ec-header" onClick={() => setOpen(o => !o)}>
+        <span className="ec-name">{exercise.exercise_name}</span>
+        <div className="ec-header-right">
+          {!open && statusBadge}
+          <span className="ec-chevron">{open ? '▲' : '▼'}</span>
         </div>
-        <div className="modal-body">
-          <div className="form-group">
-            <label className="form-label">Plan Name</label>
-            <input className="form-input" placeholder="e.g. Push Day A" value={name} onChange={e => setName(e.target.value)} />
-          </div>
-          <div className="form-group">
-            <label className="form-label">Type</label>
-            <div className="pill-row">
-              {WORKOUT_TYPES.filter(t => t !== 'Rest').map(t => (
-                <button key={t} className={`pill ${type === t ? 'pill--active' : ''}`} onClick={() => setType(t)}>{t}</button>
-              ))}
+      </button>
+
+      {open && (
+        <div className="ec-body">
+          {isSkipped ? (
+            <div className="ec-result ec-result--skip">
+              <span>Skipped</span>
+              <button className="ec-reset-sm" onClick={() => onChange(null)}>×</button>
             </div>
-          </div>
-          <div className="form-group">
-            <label className="form-label">Intensity</label>
-            <div className="pill-row">
-              {INTENSITY_OPTS.map(opt => (
-                <button key={opt} className={`pill ${intensity === opt ? 'pill--active' : ''}`} onClick={() => setIntensity(opt)}>{opt}</button>
-              ))}
-            </div>
-          </div>
-          <div className="form-group">
-            <label className="form-label">Duration (min)</label>
-            <input className="form-input" type="number" placeholder="60" value={duration} onChange={e => setDuration(e.target.value)} />
-          </div>
-          <div className="form-group">
-            <label className="form-label">Exercises</label>
-            {exercises.map((ex, ei) => (
-              <div key={ei} className="exercise-block">
-                <div className="ex-header">
-                  <input className="form-input ex-name" placeholder="Exercise name" value={ex.name}
-                    onChange={e => updateEx(ei, e.target.value)} />
-                  <button className="ex-remove" onClick={() => removeEx(ei)}>✕</button>
+          ) : (
+            <>
+              <div className="ec-grid">
+                <div className="ec-grid-head">
+                  <span>Prev lbs</span><span>Prev reps</span>
+                  <span>lbs</span><span>reps</span><span/>
                 </div>
-                {ex.sets.map((s, si) => (
-                  <div key={si} className="set-row">
-                    <input className="form-input set-input" type="number" placeholder="Reps" value={s.reps}
-                      onChange={e => updateSet(ei, si, 'reps', e.target.value)} />
-                    <input className="form-input set-input" type="number" placeholder="lbs" value={s.weight}
-                      onChange={e => updateSet(ei, si, 'weight', e.target.value)} />
-                    {ex.sets.length > 1 && (
-                      <button className="ex-remove" onClick={() => removeSet(ei, si)}>✕</button>
-                    )}
+                {sets.map((s, i) => (
+                  <div key={i} className="ec-grid-row">
+                    <span className="ec-prev">{lastSets[i]?.weight || '—'}</span>
+                    <span className="ec-prev">{lastSets[i]?.reps   || '—'}</span>
+                    <input className="ec-grid-input" type="number" inputMode="decimal"
+                      placeholder="0" value={s.weight} onChange={e => updateSet(i, 'weight', e.target.value)} />
+                    <input className="ec-grid-input" type="number" inputMode="numeric"
+                      placeholder="0" value={s.reps}   onChange={e => updateSet(i, 'reps',   e.target.value)} />
+                    <button className="ec-rm" onClick={() => removeSet(i)}
+                      style={{ visibility: sets.length > 1 ? 'visible' : 'hidden' }}>✕</button>
                   </div>
                 ))}
-                <button className="add-set-btn" onClick={() => addSet(ei)}>+ Add Set</button>
               </div>
-            ))}
-            <button className="add-ex-btn" onClick={addExercise}>+ Add Exercise</button>
-          </div>
-          {saveErr && <p className="form-error">{saveErr}</p>}
-          <button className="connect-btn health-connect-btn" onClick={handleSave}>
-            {initialPlan ? 'Save Changes' : 'Create Plan'}
-          </button>
-          {initialPlan && (
-            <button className="wc-delete" style={{ textAlign: 'center', width: '100%', padding: '10px 0' }} onClick={onDelete}>
-              Delete Plan
-            </button>
+              <div className="ec-log-footer">
+                <button className="ec-add-set" onClick={addSet}>+ Set</button>
+                <button className="ec-skip-btn" onClick={() => onChange({ action: 'skip', sets: [] })}>Skip</button>
+              </div>
+            </>
           )}
         </div>
-      </div>
-    </div>,
-    document.body
+      )}
+    </div>
   )
 }
 
-function GymTab({ gymData }) {
-  const { workouts, saving, addWorkout, deleteWorkout } = gymData
-  const planHook = usePlans()
-  const [showModal,      setShowModal]      = useState(false)
-  const [showCreatePlan, setShowCreatePlan] = useState(false)
-  const [currentPlan,    setCurrentPlan]    = useState(null)
-  const [editingPlan,    setEditingPlan]    = useState(null)
-  const streak    = calcStreak(workouts)
-  const weekFreq  = calcWeekFreq(workouts)
-  const prs       = calcPRs(workouts)
+// PlanDayLogger — pick plan then day, log exercises, save
+function PlanDayLogger({ plans, date, onSave, saving, onCancel }) {
+  const [planId, setPlanId] = useState(() => (plans.find(p => p.is_active) || plans[0])?.id || '')
+  const plan                 = plans.find(p => p.id === planId) || null
+  const [dayId, setDayId]   = useState(null)
+  const day                  = plan?.days?.find(d => d.id === dayId) || null
+  const lastPerf             = useLastPerf(dayId)
+  const [states, setStates]  = useState({})
+  const [notes, setNotes]    = useState('')
+  const [err, setErr]        = useState(null)
 
-  // This week grid
-  const weekStart = getWeekStart()
-  const dayLabels = ['M', 'T', 'W', 'T', 'F', 'S', 'S']
-  const weekDates = Array.from({ length: 7 }, (_, i) => offsetDate(weekStart, i))
+  const handlePlanChange = (id) => { setPlanId(id); setDayId(null); setStates({}) }
 
-  const handleSave = async (workout) => {
-    const result = await addWorkout(workout)
-    if (result === true) { setShowModal(false); setCurrentPlan(null) }
-    return result
+  const handleSave = async () => {
+    if (!day) { setErr('Pick a day first'); return }
+    setErr(null)
+    const exercises = day.exercises.map(ex => ({
+      exercise_name: ex.exercise_name,
+      sets_data:     states[ex.exercise_name]?.sets || [],
+      skipped:       states[ex.exercise_name]?.action === 'skip',
+    }))
+    const e = await onSave({ date, plan_id: plan.id, plan_name: plan.name, day_id: day.id, day_name: day.day_name, notes: notes.trim() || null, exercises })
+    if (e) setErr(e)
   }
 
   return (
-    <>
-      {showModal && (
-        <AddWorkoutModal
-          onSave={handleSave}
-          onClose={() => { setShowModal(false); setCurrentPlan(null) }}
-          saving={saving}
-          initialData={currentPlan}
-          title={currentPlan ? `Log: ${currentPlan.name}` : 'Log Workout'}
-        />
-      )}
-      {showCreatePlan && (
-        <CreatePlanModal
-          initialPlan={editingPlan}
-          onClose={() => { setShowCreatePlan(false); setEditingPlan(null) }}
-          onSave={(plan) => {
-            if (editingPlan) planHook.updatePlan(editingPlan.id, plan)
-            else planHook.addPlan(plan)
-            setShowCreatePlan(false); setEditingPlan(null)
-          }}
-          onDelete={() => { planHook.deletePlan(editingPlan.id); setShowCreatePlan(false); setEditingPlan(null) }}
-        />
-      )}
-    <div className="health-scroll">
-
-      {/* Stats */}
-      <div className="gym-header page-section">
-        <div className="gym-stats-row">
-          <div className="gym-stat">
-            <span className="gs-val">{streak}</span>
-            <span className="gs-label">Day Streak 🔥</span>
-          </div>
-          <div className="gym-stat">
-            <span className="gs-val">{weekFreq}</span>
-            <span className="gs-label">This Week</span>
-          </div>
+    <div>
+      <div className="gym-log-section">
+        <span className="gym-log-label">Plan</span>
+        <div className="gym-chips">
+          {plans.map(p => (
+            <button key={p.id} className={`gym-chip${planId === p.id ? ' gym-chip--active' : ''}`}
+              onClick={() => handlePlanChange(p.id)}>{p.name}</button>
+          ))}
         </div>
       </div>
 
-      {/* Plans */}
-      <section className="page-section">
-        <div className="section-header">
-          <h2 className="section-title">My Plans</h2>
-          <button className="action-btn" onClick={() => { setEditingPlan(null); setShowCreatePlan(true) }}>+ New</button>
-        </div>
-        {planHook.plans.length === 0 ? (
-          <div className="health-empty">No plans yet — create one to log workouts faster.</div>
-        ) : (
-          <div className="plans-row">
-            {planHook.plans.map(p => (
-              <PlanChip key={p.id} plan={p}
-                onLog={() => { setCurrentPlan(p); setShowModal(true) }}
-                onEdit={() => { setEditingPlan(p); setShowCreatePlan(true) }}
-              />
+      {plan && (
+        <div className="gym-log-section">
+          <span className="gym-log-label">Day</span>
+          <div className="gym-chips">
+            {(plan.days || []).map(d => (
+              <button key={d.id} className={`gym-chip${dayId === d.id ? ' gym-chip--active' : ''}`}
+                onClick={() => { setDayId(d.id); setStates({}) }}>
+                {d.day_name}
+                <span className="gym-chip-count">{d.exercises.length} ex</span>
+              </button>
             ))}
           </div>
-        )}
-      </section>
+        </div>
+      )}
 
-      {/* Custom log */}
-      <section className="page-section" style={{ paddingTop: 0 }}>
-        <button className="connect-btn health-connect-btn" onClick={() => { setCurrentPlan(null); setShowModal(true) }}>
-          + Log Custom Workout
-        </button>
-      </section>
+      {day && (
+        <div className="gym-log-section">
+          {day.exercises.map(ex => (
+            <ExerciseCard key={ex.id} exercise={ex}
+              lastPerf={lastPerf?.[ex.exercise_name] || null}
+              state={states[ex.exercise_name] || null}
+              onChange={val => setStates(s => ({ ...s, [ex.exercise_name]: val }))} />
+          ))}
+          <textarea className="form-input form-textarea" placeholder="Session notes (optional)…"
+            value={notes} onChange={e => setNotes(e.target.value)} style={{ marginTop: 8 }} />
+          {err && <p className="form-error">{err}</p>}
+          <button className="connect-btn health-connect-btn" onClick={handleSave} disabled={saving}>
+            {saving ? 'Saving…' : 'Save Session'}
+          </button>
+        </div>
+      )}
 
-      {/* This week grid */}
-      <section className="page-section">
-        <h2 className="section-title">This Week</h2>
-        <div className="card week-grid-card">
-          {weekDates.map((d, i) => {
-            const w       = workouts.find(x => x.date === d)
-            const isToday = d === todayStr()
-            const isPast  = d < todayStr()
-            const dotCls  = w ? (w.type === 'Rest' ? 'wgd-rest' : 'wgd-done') : (isPast ? 'wgd-miss' : 'wgd-future')
-            return (
-              <div key={d} className={`wg-day ${isToday ? 'wg-today' : ''}`}>
-                <span className="wgd-label">{dayLabels[i]}</span>
-                <div className={`wgd-dot ${dotCls}`}>
-                  {w ? w.type.slice(0, 2) : (isToday ? '?' : '')}
+      <button className="gym-cancel-link" onClick={onCancel}>Cancel</button>
+    </div>
+  )
+}
+
+// CustomLogger — draggable, collapsible exercises with set logging
+function CustomLogger({ date, onSave, saving, onCancel, initialData }) {
+  const [dayName,   setDayName]   = useState(initialData?.day_name || '')
+  const [exercises, setExercises] = useState(() => {
+    if (initialData?.exercises?.length) {
+      const exs = initialData.exercises.filter(e => !e.skipped)
+      if (exs.length) return exs.map((e, i) => ({
+        key: i,
+        name: e.exercise_name || '',
+        sets: e.sets_data?.length
+          ? e.sets_data.map(s => ({ weight: String(s.weight ?? ''), reps: String(s.reps ?? '') }))
+          : [{ weight: '', reps: '' }],
+      }))
+    }
+    return [{ key: 0, name: '', sets: [{ weight: '', reps: '' }] }]
+  })
+  const [openExs,   setOpenExs]   = useState(() => {
+    if (initialData?.exercises?.length) {
+      const exs = initialData.exercises.filter(e => !e.skipped)
+      return new Set(exs.map((_, i) => i))
+    }
+    return new Set([0])
+  })
+  const [notes,     setNotes]     = useState(initialData?.notes || '')
+  const [err,       setErr]       = useState(null)
+  const nextKey    = useRef(initialData?.exercises?.filter(e => !e.skipped).length || 1)
+  const ghostElRef = useRef(null)
+  const exRowRefs  = useRef({})
+  const dragRef    = useRef(null)
+  const [dragState, setDragState] = useState(null)
+
+  useEffect(() => {
+    if (!dragState) return
+    const onMove = (e) => {
+      const clientY = e.touches?.[0]?.clientY ?? e.clientY
+      if (e.cancelable) e.preventDefault()
+      const dr = dragRef.current; if (!dr) return
+      if (ghostElRef.current) ghostElRef.current.style.top = `${clientY - dr.offsetY}px`
+      const ghostCenterY = clientY - dr.offsetY + dr.rowH / 2
+      const n = Object.keys(dr.origCenters).length
+      let t = n - 1
+      for (let i = 0; i < n; i++) { if (ghostCenterY < dr.origCenters[i]) { t = i; break } }
+      t = Math.max(0, Math.min(n - 1, t))
+      if (t !== dr.targetEi) { dr.targetEi = t; setDragState(s => s ? { ...s, targetEi: t } : null) }
+    }
+    const onUp = () => {
+      const dr = dragRef.current
+      if (dr && dr.fromEi !== dr.targetEi) {
+        setExercises(exs => {
+          const arr = [...exs]; const [moved] = arr.splice(dr.fromEi, 1); arr.splice(dr.targetEi, 0, moved); return arr
+        })
+      }
+      setDragState(null); dragRef.current = null
+    }
+    window.addEventListener('pointermove', onMove, { passive: false })
+    window.addEventListener('pointerup', onUp)
+    return () => { window.removeEventListener('pointermove', onMove); window.removeEventListener('pointerup', onUp) }
+  }, [dragState !== null])
+
+  const addEx    = () => { const k = nextKey.current++; setExercises(e => [...e, { key: k, name: '', sets: [{ weight: '', reps: '' }] }]); setOpenExs(s => new Set([...s, exercises.length])) }
+  const remEx    = (i) => setExercises(e => e.filter((_, j) => j !== i))
+  const updName  = (i, v) => setExercises(e => e.map((ex, j) => j === i ? { ...ex, name: v } : ex))
+  const addSet   = (i) => setExercises(e => e.map((ex, j) => j === i ? { ...ex, sets: [...ex.sets, { weight: '', reps: '' }] } : ex))
+  const remSet   = (i, si) => setExercises(e => e.map((ex, j) => j === i ? { ...ex, sets: ex.sets.filter((_, k) => k !== si) } : ex))
+  const updSet   = (i, si, f, v) => setExercises(e => e.map((ex, j) => j === i ? { ...ex, sets: ex.sets.map((s, k) => k === si ? { ...s, [f]: v } : s) } : ex))
+  const toggleEx = (i) => setOpenExs(s => { const n = new Set(s); n.has(i) ? n.delete(i) : n.add(i); return n })
+
+  const handleSave = async () => {
+    const valid = exercises.filter(e => e.name.trim())
+    if (!valid.length) { setErr('Add at least one exercise'); return }
+    setErr(null)
+    const exData = valid.map(ex => ({ exercise_name: ex.name.trim(), sets_data: ex.sets.filter(s => s.weight || s.reps), skipped: false }))
+    const e = await onSave({ date, day_name: dayName.trim() || 'Custom', notes: notes.trim() || null, exercises: exData })
+    if (e) setErr(e)
+  }
+
+  return (
+    <div>
+      <input className="form-input cl-title" placeholder="Workout title (e.g. Push Day)"
+        value={dayName} onChange={e => setDayName(e.target.value)} />
+
+      {exercises.map((ex, i) => {
+        const isOpen = openExs.has(i)
+        const hasData = ex.sets.some(s => s.weight || s.reps)
+        let rowTransform = 'none', rowOpacity = 1
+        if (dragState) {
+          const { fromEi, targetEi, rowH } = dragState
+          if (i === fromEi) { rowOpacity = 0.25 }
+          else if (fromEi < targetEi && i > fromEi && i <= targetEi) { rowTransform = `translateY(-${rowH}px)` }
+          else if (fromEi > targetEi && i >= targetEi && i < fromEi) { rowTransform = `translateY(${rowH}px)` }
+        }
+        return (
+          <div key={ex.key} ref={el => exRowRefs.current[i] = el}
+            className={`ex-card card${hasData ? ' ex-card--done' : ''}`}
+            style={{ transform: rowTransform, opacity: rowOpacity, transition: dragState ? 'transform 150ms ease, opacity 150ms ease' : 'none', marginBottom: 8 }}>
+            <div className="cl-ex-header">
+              <span className="pdb-handle" onPointerDown={(e) => {
+                e.preventDefault()
+                const row = exRowRefs.current[i]; const rect = row.getBoundingClientRect()
+                const origCenters = {}
+                exercises.forEach((_, idx) => { const el = exRowRefs.current[idx]; if (el) { const r = el.getBoundingClientRect(); origCenters[idx] = r.top + r.height / 2 } })
+                dragRef.current = { fromEi: i, targetEi: i, offsetY: e.clientY - rect.top, rowH: rect.height, origCenters }
+                setDragState({ fromEi: i, targetEi: i, rowH: rect.height, label: ex.name, ghostLeft: rect.left, ghostWidth: rect.width, ghostY: rect.top })
+              }}>⠿</span>
+              <input className="cl-ex-name-input" placeholder="Exercise name"
+                value={ex.name} onChange={e => updName(i, e.target.value)} />
+              {!isOpen && hasData && <span className="ec-badge ec-badge--done">✓</span>}
+              <button className="cl-chevron-btn" onClick={() => toggleEx(i)}>
+                <span className="ec-chevron">{isOpen ? '▲' : '▼'}</span>
+              </button>
+              <button className="ex-remove" onClick={() => remEx(i)}>✕</button>
+            </div>
+            {isOpen && (
+              <div className="ec-body">
+                <div className="ec-grid">
+                  <div className="ec-grid-head" style={{ gridTemplateColumns: '1fr 1fr 18px' }}>
+                    <span>LBS</span><span>REPS</span><span/>
+                  </div>
+                  {ex.sets.map((s, si) => (
+                    <div key={si} className="ec-grid-row" style={{ gridTemplateColumns: '1fr 1fr 18px' }}>
+                      <input className="ec-grid-input" type="number" inputMode="decimal"
+                        placeholder="0" value={s.weight} onChange={e => updSet(i, si, 'weight', e.target.value)} />
+                      <input className="ec-grid-input" type="number" inputMode="numeric"
+                        placeholder="0" value={s.reps} onChange={e => updSet(i, si, 'reps', e.target.value)} />
+                      <button className="ec-rm" onClick={() => remSet(i, si)}
+                        style={{ visibility: ex.sets.length > 1 ? 'visible' : 'hidden' }}>✕</button>
+                    </div>
+                  ))}
                 </div>
+                <div className="ec-log-footer">
+                  <button className="ec-add-set" onClick={() => addSet(i)}>+ Set</button>
+                </div>
+              </div>
+            )}
+          </div>
+        )
+      })}
+
+      <button className="pf-add-day" onClick={addEx}>+ Exercise</button>
+      <textarea className="form-input form-textarea" placeholder="Session notes (optional)…"
+        value={notes} onChange={e => setNotes(e.target.value)} style={{ marginTop: 8 }} />
+      {err && <p className="form-error">{err}</p>}
+      <button className="connect-btn health-connect-btn" onClick={handleSave} disabled={saving} style={{ marginTop: 8 }}>
+        {saving ? 'Saving…' : 'Save Session'}
+      </button>
+      <button className="gym-cancel-link" onClick={onCancel}>Cancel</button>
+
+      {dragState && createPortal(
+        <div ref={ghostElRef} className="pdb-ghost"
+          style={{ top: dragState.ghostY, left: dragState.ghostLeft, width: dragState.ghostWidth }}>
+          <span className="pdb-handle">⠿</span>
+          <span className="pdb-ghost-label">{dragState.label || 'Exercise'}</span>
+        </div>, document.body
+      )}
+    </div>
+  )
+}
+
+// PlanForm — create or edit a plan with days + exercises
+function PlanForm({ plan, onBack, onSaved }) {
+  const [name, setName] = useState(plan?.name || '')
+  const [days, setDays] = useState(() =>
+    (plan?.days || []).map(d => ({
+      id: d.id, day_name: d.day_name,
+      exercises: (d.exercises || []).map(e => ({
+        id: e.id, exercise_name: e.exercise_name,
+        target_sets: String(e.target_sets || ''), target_reps: e.target_reps || '',
+      })),
+    }))
+  )
+  const deletedDayIds  = useRef([])
+  const deletedExIds   = useRef([])
+  const [saving, setSaving]         = useState(false)
+  const [err, setErr]               = useState(null)
+  const [collapsedDays, setCollapsedDays] = useState(() => new Set((plan?.days || []).map((_, i) => i)))
+  const toggleDay = (di) => setCollapsedDays(s => { const n = new Set(s); n.has(di) ? n.delete(di) : n.add(di); return n })
+
+  const ghostElRef  = useRef(null)
+  const exRowRefs   = useRef({})
+  const dragRef     = useRef(null) // { di, fromEi, targetEi, offsetY, rowH, origCenters }
+  const [dragState, setDragState] = useState(null)
+  // dragState: { di, fromEi, targetEi, rowH, label, ghostLeft, ghostWidth, ghostY }
+
+  const isDragging = dragState !== null
+  useEffect(() => {
+    if (!isDragging) return
+    const onMove = (e) => {
+      const clientY = e.touches?.[0]?.clientY ?? e.clientY
+      if (e.cancelable) e.preventDefault()
+      const dr = dragRef.current
+      if (!dr) return
+      // Smooth ghost follow via direct DOM
+      if (ghostElRef.current) ghostElRef.current.style.top = `${clientY - dr.offsetY}px`
+      // Compute new targetEi from original centers
+      const ghostCenterY = clientY - dr.offsetY + dr.rowH / 2
+      const n = Object.keys(dr.origCenters).length
+      let newTarget = n - 1
+      for (let i = 0; i < n; i++) {
+        if (ghostCenterY < dr.origCenters[i]) { newTarget = i; break }
+      }
+      newTarget = Math.max(0, Math.min(n - 1, newTarget))
+      if (newTarget !== dr.targetEi) {
+        dr.targetEi = newTarget
+        setDragState(s => s ? { ...s, targetEi: newTarget } : null)
+      }
+    }
+    const onUp = () => {
+      const dr = dragRef.current
+      if (dr && dr.fromEi !== dr.targetEi) reorderExercise(dr.di, dr.fromEi, dr.targetEi)
+      setDragState(null)
+      dragRef.current = null
+    }
+    window.addEventListener('pointermove', onMove, { passive: false })
+    window.addEventListener('pointerup',   onUp)
+    return () => { window.removeEventListener('pointermove', onMove); window.removeEventListener('pointerup', onUp) }
+  }, [isDragging])
+
+  const addDay         = () => setDays(d => [...d, { day_name: '', exercises: [] }])
+  const removeDay      = (i) => { const id = days[i].id; if (id) deletedDayIds.current.push(id); setDays(d => d.filter((_, j) => j !== i)) }
+  const updateDay      = (i, val) => setDays(d => d.map((day, j) => j === i ? { ...day, day_name: val } : day))
+  const addExercise    = (di) => setDays(d => d.map((day, j) => j === di ? { ...day, exercises: [...day.exercises, { exercise_name: '', target_sets: '', target_reps: '' }] } : day))
+  const removeExercise = (di, ei) => { const id = days[di].exercises[ei].id; if (id) deletedExIds.current.push(id); setDays(d => d.map((day, j) => j === di ? { ...day, exercises: day.exercises.filter((_, k) => k !== ei) } : day)) }
+  const updateExercise = (di, ei, field, val) => setDays(d => d.map((day, j) => j === di ? { ...day, exercises: day.exercises.map((ex, k) => k === ei ? { ...ex, [field]: val } : ex) } : day))
+  const reorderExercise = (di, fromEi, toEi) => {
+    if (fromEi === toEi) return
+    setDays(d => d.map((day, j) => {
+      if (j !== di) return day
+      const exs = [...day.exercises]
+      const [moved] = exs.splice(fromEi, 1)
+      exs.splice(toEi, 0, moved)
+      return { ...day, exercises: exs }
+    }))
+  }
+
+  const post  = (url, body) => fetch(url, { method: 'POST',  headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(r => r.json())
+  const patch = (url, body) => fetch(url, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+  const del   = (url)       => fetch(url, { method: 'DELETE' })
+
+  const handleSave = async () => {
+    setErr(null)
+    if (!name.trim()) { setErr('Plan name is required'); return }
+    setSaving(true)
+    try {
+      let planId = plan?.id
+      if (plan) { await patch(`/api/gym/plans/${planId}`, { name: name.trim() }) }
+      else       { const res = await post('/api/gym/plans', { name: name.trim() }); if (res.error) throw new Error(res.error); planId = res.id }
+      for (const id of deletedDayIds.current) await del(`/api/gym/days/${id}`)
+      for (const id of deletedExIds.current)  await del(`/api/gym/exercises/${id}`)
+      for (let di = 0; di < days.length; di++) {
+        const day = days[di]
+        if (!day.day_name.trim()) continue
+        let dayId = day.id
+        if (dayId) { await patch(`/api/gym/days/${dayId}`, { day_name: day.day_name, day_order: di }) }
+        else        { const res = await post(`/api/gym/plans/${planId}/days`, { day_name: day.day_name, day_order: di }); if (res.error) throw new Error(res.error); dayId = res.id }
+        for (let ei = 0; ei < day.exercises.length; ei++) {
+          const ex = day.exercises[ei]
+          if (!ex.exercise_name.trim()) continue
+          const exData = { exercise_name: ex.exercise_name.trim(), target_sets: parseInt(ex.target_sets) || null, target_reps: ex.target_reps.trim() || null, order: ei }
+          if (ex.id) await patch(`/api/gym/exercises/${ex.id}`, exData)
+          else       await post(`/api/gym/days/${dayId}/exercises`, exData)
+        }
+      }
+      onSaved()
+    } catch (e) { setErr(e.message || 'Save failed') }
+    finally { setSaving(false) }
+  }
+
+  const handleDelete = async () => {
+    if (!plan) return
+    // eslint-disable-next-line no-restricted-globals
+    if (!confirm(`Delete "${plan.name}"? This cannot be undone.`)) return
+    await del(`/api/gym/plans/${plan.id}`)
+    onSaved()
+  }
+
+  return (
+    <div>
+      {/* Header: Back | Title | Save */}
+      <div className="pf-header">
+        <button className="pf-back" onClick={onBack}>{'<'} Back</button>
+        <span className="pf-title">{plan ? 'Editing' : 'New Plan'}</span>
+        <button className="pf-save" onClick={handleSave} disabled={saving}>
+          {saving ? 'Saving…' : 'Save'}
+        </button>
+      </div>
+
+      <input className="form-input pf-plan-name" placeholder="Plan name (e.g. Push Pull Legs)"
+        value={name} onChange={e => setName(e.target.value)} />
+
+      {days.map((day, di) => {
+        const isCollapsed = collapsedDays.has(di)
+        return (
+        <div key={di} className="plan-day-block">
+          <div className="pdb-header">
+            <button className="pdb-toggle" onClick={() => toggleDay(di)}>
+              <span className="pdb-chevron">{isCollapsed ? '▶' : '▼'}</span>
+            </button>
+            <div className="pdb-name-wrap">
+              <input className="pdb-name-input" placeholder="Day name (e.g. Push)"
+                value={day.day_name} onChange={e => updateDay(di, e.target.value)} />
+              {day.exercises.length > 0 && (
+                <span className="pdb-ex-count">{day.exercises.length} {day.exercises.length === 1 ? 'exercise' : 'exercises'}</span>
+              )}
+            </div>
+            <button className="ex-remove" onClick={() => removeDay(di)}>✕</button>
+          </div>
+          {!isCollapsed && day.exercises.map((ex, ei) => {
+            let rowTransform = 'none', rowOpacity = 1
+            if (dragState && dragState.di === di) {
+              const { fromEi, targetEi, rowH } = dragState
+              if (ei === fromEi) { rowOpacity = 0.25 }
+              else if (fromEi < targetEi && ei > fromEi && ei <= targetEi) { rowTransform = `translateY(-${rowH}px)` }
+              else if (fromEi > targetEi && ei >= targetEi && ei < fromEi) { rowTransform = `translateY(${rowH}px)` }
+            }
+            return (
+              <div key={ex.id ?? `new-${ei}`}
+                ref={el => exRowRefs.current[`${di}-${ei}`] = el}
+                className="pdb-ex-row"
+                style={{ transform: rowTransform, opacity: rowOpacity, transition: dragState ? 'transform 150ms ease, opacity 150ms ease' : 'none' }}>
+                <span className="pdb-handle"
+                  onPointerDown={(e) => {
+                    e.preventDefault()
+                    const row = e.currentTarget.closest('.pdb-ex-row')
+                    const rect = row.getBoundingClientRect()
+                    const dayLen = days[di].exercises.length
+                    const origCenters = {}
+                    for (let i = 0; i < dayLen; i++) {
+                      const el = exRowRefs.current[`${di}-${i}`]
+                      if (el) { const r = el.getBoundingClientRect(); origCenters[i] = r.top + r.height / 2 }
+                    }
+                    dragRef.current = { di, fromEi: ei, targetEi: ei, offsetY: e.clientY - rect.top, rowH: rect.height, origCenters }
+                    setDragState({ di, fromEi: ei, targetEi: ei, rowH: rect.height, label: ex.exercise_name, ghostLeft: rect.left, ghostWidth: rect.width, ghostY: rect.top })
+                  }}>⠿</span>
+                <input className="form-input pdb-ex-name" placeholder="Exercise name"
+                  value={ex.exercise_name} onChange={e => updateExercise(di, ei, 'exercise_name', e.target.value)} />
+                <button className="ex-remove" onClick={() => removeExercise(di, ei)}>✕</button>
               </div>
             )
           })}
+          {!isCollapsed && <button className="add-ex-btn" onClick={() => addExercise(di)}>+ Exercise</button>}
         </div>
-      </section>
+        )
+      })}
 
-      {/* Personal records */}
-      {prs.length > 0 && (
-        <section className="page-section">
-          <h2 className="section-title">Personal Records</h2>
-          <div className="card detail-card">
-            {prs.map(([name, weight]) => (
-              <div key={name} className="detail-row">
-                <span className="detail-label">{name}</span>
-                <span className="detail-value" style={{ color: 'var(--accent)' }}>{weight} lbs</span>
-              </div>
-            ))}
-          </div>
-        </section>
+      <button className="pf-add-day" onClick={addDay}>+ Add Day</button>
+
+      {err && <p className="form-error" style={{ marginTop: 8 }}>{err}</p>}
+
+      {plan && (
+        <button className="pf-delete" onClick={handleDelete}>Delete Plan</button>
       )}
 
-      {/* Recent workouts */}
-      <section className="page-section">
-        <h2 className="section-title">Recent Workouts</h2>
-        {workouts.length === 0
-          ? <div className="health-empty">No workouts logged yet. Tap Log Workout to start.</div>
-          : workouts.slice(0, 20).map(w => (
-              <WorkoutCard key={w.id} w={w} onDelete={deleteWorkout} />
-            ))
-        }
-      </section>
+      {dragState && createPortal(
+        <div ref={ghostElRef} className="pdb-ghost"
+          style={{ top: dragState.ghostY, left: dragState.ghostLeft, width: dragState.ghostWidth }}>
+          <span className="pdb-handle">⠿</span>
+          <span className="pdb-ghost-label">{dragState.label || 'Exercise'}</span>
+        </div>,
+        document.body
+      )}
     </div>
-    </>
   )
 }
 
-// ── ACTIVITY TAB ──────────────────────────────────────────────────────────────
+// GymLogView — date-centric logging tab
+function GymLogView({ plansHook, logsHook, saving, onSave, onDelete, date, onDateChange }) {
+  const [mode, setMode] = useState(null)
+  const existingLog     = logsHook.logs.find(l => l.date === date)
+
+  const handleDateChange = (d) => { onDateChange(d); setMode(null) }
+  const handleSave       = async (data, replaceId) => { const err = await onSave(data, replaceId); if (!err) setMode(null); return err }
+
+  return (
+    <div>
+      <div className="gym-date-nav">
+        <button className="hnav-btn" onClick={() => handleDateChange(offsetDate(date, -1))}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><polyline points="15 18 9 12 15 6"/></svg>
+        </button>
+        <span className="gym-date-label">{fmtDateLabel(date)}</span>
+        <button className="hnav-btn" onClick={() => handleDateChange(offsetDate(date, +1))} disabled={date >= todayStr()}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><polyline points="9 18 15 12 9 6"/></svg>
+        </button>
+      </div>
+
+      {existingLog && mode !== 'edit' ? (
+        <LoggedWorkout log={existingLog} onDelete={onDelete} onEdit={() => setMode('edit')} />
+      ) : existingLog && mode === 'edit' ? (
+        <CustomLogger date={date} onSave={(data) => handleSave(data, existingLog.id)} saving={saving} onCancel={() => setMode(null)} initialData={existingLog} />
+      ) : mode === 'plan' ? (
+        plansHook.plans.length === 0
+          ? <p className="health-empty">No plans yet — create one in the Plans tab.</p>
+          : <PlanDayLogger plans={plansHook.plans} date={date} onSave={handleSave} saving={saving} onCancel={() => setMode(null)} />
+      ) : mode === 'custom' ? (
+        <CustomLogger date={date} onSave={handleSave} saving={saving} onCancel={() => setMode(null)} />
+      ) : (
+        <div className="gym-log-options">
+          <button className="gym-log-opt" onClick={() => setMode('plan')}>
+            <span className="glo-icon">📋</span>
+            <div className="glo-text">
+              <span className="glo-label">Use a Plan</span>
+              <span className="glo-sub">Pick a plan + day</span>
+            </div>
+          </button>
+          <button className="gym-log-opt" onClick={() => setMode('custom')}>
+            <span className="glo-icon">✏️</span>
+            <div className="glo-text">
+              <span className="glo-label">Custom Workout</span>
+              <span className="glo-sub">Add exercises freely</span>
+            </div>
+          </button>
+          <button className="gym-log-opt gym-log-opt--rest" disabled={saving}
+            onClick={() => onSave({ date, day_name: 'Rest', notes: null, exercises: [] })}>
+            <span className="glo-icon">😴</span>
+            <div className="glo-text">
+              <span className="glo-label">Rest Day</span>
+              <span className="glo-sub">Mark as rest</span>
+            </div>
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// GymPlansView — manage plans
+function GymPlansView({ plansHook }) {
+  const [editing, setEditing] = useState(undefined)
+  const { plans, loading }    = plansHook
+
+  const setActive = async (planId) => {
+    await fetch(`/api/gym/plans/${planId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ is_active: true }) })
+    plansHook.refetch()
+  }
+
+  if (editing !== undefined) {
+    return <PlanForm plan={editing || null} onBack={() => setEditing(undefined)} onSaved={() => { plansHook.refetch(); setEditing(undefined) }} />
+  }
+
+  return (
+    <div>
+      <button className="plans-fab" onClick={() => setEditing(null)}>+</button>
+      {loading && <div className="health-empty">Loading…</div>}
+      {!loading && plans.length === 0 && (
+        <div className="health-empty">No plans yet — tap + to get started.</div>
+      )}
+      {plans.map(p => (
+        <div key={p.id} className="card plan-row">
+          <div className="plan-row-left">
+            <span className="plan-row-name">{p.name}</span>
+            <span className="plan-row-meta">
+              {(p.days || []).length} days · {(p.days || []).reduce((s, d) => s + d.exercises.length, 0)} ex
+            </span>
+          </div>
+          <div className="plan-row-right">
+            {p.is_active
+              ? <span className="plan-active-badge">Active</span>
+              : <button className="plan-activate-btn" onClick={() => setActive(p.id)}>Set Active</button>
+            }
+            <button className="action-btn" onClick={() => setEditing(p)}>Edit</button>
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// GymTab — week strip + LOG | PLANS tabs
+function GymTab() {
+  const plansHook = usePlans()
+  const logsHook  = useWorkoutLogs()
+  const [tab,    setTab]    = useState('log')
+  const [saving, setSaving] = useState(false)
+  const [date,   setDate]   = useState(todayStr())
+
+  const saveSession = async (data, replaceId = null) => {
+    setSaving(true)
+    try {
+      if (replaceId) await fetch(`/api/gym/logs/${replaceId}`, { method: 'DELETE' })
+      const res  = await fetch('/api/gym/logs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })
+      const json = await res.json()
+      if (json.error) throw new Error(json.error)
+      await logsHook.refetch()
+      return null
+    } catch (e) { return e.message || 'Save failed' }
+    finally { setSaving(false) }
+  }
+
+  const deleteLog = async (id) => {
+    await fetch(`/api/gym/logs/${id}`, { method: 'DELETE' })
+    logsHook.refetch()
+  }
+
+  return (
+    <div className="health-scroll">
+      <div className="page-section">
+        <WeekStrip logs={logsHook.logs} date={date} onDateChange={setDate} />
+      </div>
+
+      <div className="gym-subtabs">
+        <button className={`gym-subtab${tab === 'log' ? ' active' : ''}`} onClick={() => setTab('log')}>Log</button>
+        <button className={`gym-subtab${tab === 'plans' ? ' active' : ''}`} onClick={() => setTab('plans')}>Plans</button>
+      </div>
+
+      <div className="page-section">
+        {tab === 'log'
+          ? <GymLogView plansHook={plansHook} logsHook={logsHook} saving={saving} onSave={saveSession} onDelete={deleteLog} date={date} onDateChange={setDate} />
+          : <GymPlansView plansHook={plansHook} />
+        }
+      </div>
+    </div>
+  )
+}
+
+
+// â”€â”€ ACTIVITY TAB â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function ActivityTab({ oura, date, setDate }) {
   const { data, loading, refetch } = oura
@@ -1017,10 +1437,9 @@ function ActivityTab({ oura, date, setDate }) {
   )
 }
 
-// ── TRENDS TAB ────────────────────────────────────────────────────────────────
+// â”€â”€ TRENDS TAB â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-function TrendsTab({ weekData, gymData }) {
-  const { workouts } = gymData
+function TrendsTab({ weekData, logs }) {
   const last30 = (weekData || []).slice(-30)
   const last7  = last30.slice(-7)
 
@@ -1050,8 +1469,8 @@ function TrendsTab({ weekData, gymData }) {
   const bestDay  = dowAvgs.sort((a, b) => b.avg - a.avg)[0]
   const worstDay = dowAvgs.sort((a, b) => a.avg - b.avg)[0]
 
-  // Gym correlation: readiness on workout days vs rest days
-  const workoutDates = new Set(workouts.filter(w => w.type !== 'Rest').map(w => w.date))
+  // Gym correlation: readiness on workout days vs rest days (using new workout_logs)
+  const workoutDates = new Set((logs || []).map(l => l.date))
   const rdOnWorkout  = last30.filter(d => workoutDates.has(d.date) && d.readiness_score != null).map(d => d.readiness_score)
   const rdOnRest     = last30.filter(d => !workoutDates.has(d.date) && d.readiness_score != null).map(d => d.readiness_score)
   const avgRdWorkout = rdOnWorkout.length ? Math.round(rdOnWorkout.reduce((s,v) => s+v, 0) / rdOnWorkout.length) : null
@@ -1129,7 +1548,7 @@ function TrendsTab({ weekData, gymData }) {
   )
 }
 
-// ── Connect screen ────────────────────────────────────────────────────────────
+// â”€â”€ Connect screen â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function ConnectScreen({ onConnect, loading, error }) {
   const [token, setToken] = useState('')
@@ -1157,7 +1576,7 @@ function ConnectScreen({ onConnect, loading, error }) {
   )
 }
 
-// ── Main ──────────────────────────────────────────────────────────────────────
+// â”€â”€ Main â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export default function Health() {
   const [tab,            setTab]           = useState('today')
@@ -1166,9 +1585,9 @@ export default function Health() {
   const [connectError,   setConnectError]   = useState(null)
   const [date,           setDate]           = useState(todayStr())
 
-  const oura    = useOuraToday(linked, date)
+  const oura     = useOuraToday(linked, date)
   const weekData = useOuraWeek(linked)
-  const gymData  = useGymData()
+  const logsHook = useWorkoutLogs()
 
   // Always verify connection on mount so all devices stay in sync
   useEffect(() => {
@@ -1198,11 +1617,11 @@ export default function Health() {
         <HealthTabs tab={tab} setTab={setTab} />
       </div>
 
-      {tab === 'today'    && <TodayTab    oura={oura}    gymData={gymData} date={date} setDate={setDate} />}
+      {tab === 'today'    && <TodayTab    oura={oura}    logs={logsHook.logs} date={date} setDate={setDate} />}
       {tab === 'sleep'    && <SleepTab    oura={oura}    weekData={weekData} date={date} setDate={setDate} />}
-      {tab === 'gym'      && <GymTab      gymData={gymData} />}
+      {tab === 'gym'      && <GymTab />}
       {tab === 'activity' && <ActivityTab oura={oura}    date={date} setDate={setDate} />}
-      {tab === 'trends'   && <TrendsTab   weekData={weekData} gymData={gymData} />}
+      {tab === 'trends'   && <TrendsTab   weekData={weekData} logs={logsHook.logs} />}
     </div>
   )
 }

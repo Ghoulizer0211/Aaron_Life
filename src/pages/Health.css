@@ -289,16 +289,20 @@
 }
 .wg-today .wgd-label { color: var(--accent); font-weight: 700; }
 
-.wgd-label { font-size: 12px; color: var(--text-muted); font-weight: 600; }
+.wgd-label { font-size: 11px; color: var(--text-muted); font-weight: 600; }
+.wgd-date  { font-size: 10px; color: var(--text-muted); opacity: 0.6; }
 .wgd-dot {
   width: 32px; height: 32px; border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
-  font-size: 10px; font-weight: 700; border: 1.5px solid var(--border); color: var(--text-muted);
+  font-size: 13px; font-weight: 800; border: 1.5px solid var(--border); color: var(--text-muted);
 }
-.wgd-dot.wgd-done   { background: rgba(0,255,157,0.15); border-color: var(--green); color: var(--green); }
-.wgd-dot.wgd-rest   { background: rgba(100,100,100,0.1); border-color: #555; color: #888; }
-.wgd-dot.wgd-miss   { background: rgba(255,56,100,0.08); border-color: rgba(255,56,100,0.3); color: #ff3864; }
-.wgd-dot.wgd-future { background: transparent; border-color: var(--border); }
+.wgd-dot.wgd-done   { background: rgba(0,255,157,0.18); border-color: var(--green); color: var(--green); }
+.wgd-dot.wgd-rest   { background: rgba(255,255,255,0.04); border-color: #444; border-style: dashed; font-size: 16px; }
+.wgd-dot.wgd-miss   { background: transparent; border-color: rgba(255,56,100,0.25); border-style: dashed; }
+.wgd-dot.wgd-future { background: transparent; border-color: #333; }
+.wg-today .wgd-dot  { border-color: #ffe600 !important; box-shadow: 0 0 0 1px rgba(255,230,0,0.25); }
+.wg-selected .wgd-dot { box-shadow: 0 0 0 2px var(--accent) !important; }
+.wg-selected .wgd-label, .wg-selected .wgd-date { color: var(--accent); }
 
 /* Workout card */
 .workout-card { margin-bottom: 8px; overflow: hidden; }
@@ -319,14 +323,17 @@
   padding: 0 16px 14px; border-top: 1px solid var(--border);
   display: flex; flex-direction: column; gap: 8px;
 }
-.wc-exercise { display: flex; flex-direction: column; gap: 2px; padding-top: 10px; }
+.wc-exercise { display: flex; flex-direction: column; gap: 2px; padding-top: 8px; padding-left: 10px; }
 .wce-name { font-size: 14px; font-weight: 700; color: var(--text-primary); }
 .wce-sets { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
 .wce-set  { font-size: 12px; color: var(--text-muted); background: var(--bg-card);
   border: 1px solid var(--border); border-radius: 5px; padding: 2px 7px; }
 .wc-notes { font-size: 13px; color: var(--text-muted); font-style: italic; }
-.wc-delete { font-size: 13px; color: var(--red); font-weight: 600; font-family: inherit;
-  margin-top: 4px; text-align: left; }
+.wc-divider { height: 1px; background: var(--border); margin: 0 0 10px; }
+.wc-actions { display: flex; align-items: center; gap: 0; margin-top: 10px; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+.wc-edit, .wc-delete { flex: 1; padding: 9px 0; font-size: 13px; font-weight: 700; font-family: inherit; text-align: center; }
+.wc-edit { color: var(--accent); border-right: 1px solid var(--border); }
+.wc-delete { color: var(--red); }
 
 /* ── Add Workout Modal ───────────────────────────────────────────────────────── */
 
@@ -458,3 +465,325 @@
   -webkit-tap-highlight-color: transparent; flex-shrink: 0;
 }
 .pc-edit:active { color: var(--accent); background: var(--accent-dim); }
+
+/* ── Workout session header ─────────────────────────────────────────────────── */
+.ws-header {
+  display: flex; align-items: center; gap: 10px;
+  padding: 12px 16px; border-bottom: 1px solid var(--border);
+  position: sticky; top: 0; background: var(--bg); z-index: 10;
+}
+.ws-back {
+  font-size: 18px; font-weight: 600; color: var(--accent);
+  font-family: inherit; padding: 4px 8px 4px 0;
+  -webkit-tap-highlight-color: transparent; flex-shrink: 0;
+}
+.ws-title-wrap { flex: 1; display: flex; flex-direction: column; gap: 1px; overflow: hidden; }
+.ws-title { font-size: 17px; font-weight: 700; color: var(--text-primary); }
+.ws-plan-name { font-size: 12px; color: var(--text-muted); }
+
+/* ── Day chips ───────────────────────────────────────────────────────────────── */
+.day-chips { display: flex; flex-direction: column; gap: 10px; }
+.day-chip {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 16px; background: var(--card-bg); border: 1px solid var(--border);
+  border-radius: 12px; text-align: left; width: 100%;
+  -webkit-tap-highlight-color: transparent;
+}
+.day-chip:active { background: var(--accent-dim); border-color: var(--accent); }
+.dc-name { font-size: 16px; font-weight: 700; color: var(--text-primary); }
+.dc-count { font-size: 13px; color: var(--text-muted); }
+
+/* ── Exercise card ───────────────────────────────────────────────────────────── */
+.ex-card { margin-bottom: 10px; padding: 12px 14px; overflow: hidden; }
+.ex-card--done { border-color: var(--accent); }
+.ec-header {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  width: 100%; font-family: inherit; text-align: left;
+}
+.ec-header-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.ec-chevron { font-size: 10px; color: var(--text-muted); }
+.ec-badge { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 20px; flex-shrink: 0; }
+.ec-badge--done { background: rgba(0,255,157,0.15); color: var(--accent); }
+.ec-badge--skip { background: rgba(255,255,255,0.07); color: var(--text-muted); }
+.ec-name { font-size: 15px; font-weight: 700; color: var(--text-primary); min-width: 0; }
+.ec-body { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
+
+/* 4-column set grid */
+.ec-grid { display: flex; flex-direction: column; gap: 5px; width: 100%; }
+.ec-grid-head, .ec-grid-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr 1fr 18px;
+  gap: 5px; align-items: center; width: 100%;
+}
+.ec-grid-head span {
+  font-size: 10px; font-weight: 700; color: var(--text-muted);
+  text-transform: uppercase; letter-spacing: 0.04em; text-align: center;
+}
+.ec-prev { font-size: 13px; color: rgba(255,255,255,0.28); text-align: center; font-weight: 500; }
+.ec-grid-input {
+  width: 100%; padding: 7px 2px; background: var(--surface);
+  border: 1px solid var(--border); border-radius: 8px;
+  font-size: 14px; font-weight: 600; color: var(--text-primary);
+  font-family: inherit; text-align: center; box-sizing: border-box; min-width: 0;
+}
+.ec-rm { font-size: 11px; color: var(--text-muted); text-align: center; padding: 2px; }
+.ec-log-footer { display: flex; gap: 16px; margin-top: 8px; align-items: center; }
+.ec-add-set  { font-size: 13px; color: var(--accent); font-family: inherit; font-weight: 600; }
+.ec-skip-btn { font-size: 13px; color: var(--text-muted); font-family: inherit; }
+.ec-result { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; border-radius: 8px; font-size: 14px; font-weight: 600; }
+.ec-result--skip { background: rgba(255,255,255,0.04); color: var(--text-muted); }
+.ec-reset-sm { font-size: 14px; color: currentColor; opacity: 0.6; font-family: inherit; margin-left: 8px; }
+
+/* ── Plans view ─────────────────────────────────────────────────────────────── */
+.plans-fab {
+  position: fixed; bottom: 88px; right: 20px; z-index: 100;
+  width: 56px; height: 56px; border-radius: 16px;
+  background: rgba(0,230,255,0.18);
+  border: 2px solid rgba(0,230,255,0.9);
+  color: rgb(0,230,255); font-size: 30px; font-weight: 300; font-family: inherit;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 0 24px rgba(0,230,255,0.5), 0 0 8px rgba(0,230,255,0.3), inset 0 0 16px rgba(0,230,255,0.12);
+  line-height: 1; padding-bottom: 1px;
+}
+.plans-fab:active { transform: scale(0.9); opacity: 0.8; }
+
+.plan-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 16px; margin-bottom: 10px;
+}
+.plan-row-left { display: flex; flex-direction: column; gap: 3px; }
+.plan-row-name { font-size: 16px; font-weight: 700; color: var(--text-primary); }
+.plan-row-meta { font-size: 13px; color: var(--text-muted); }
+.plan-row-right { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+.plan-active-badge {
+  font-size: 12px; font-weight: 700; color: var(--accent); padding: 3px 8px;
+  border: 1px solid var(--accent); border-radius: 20px;
+}
+.plan-activate-btn {
+  font-size: 12px; color: var(--text-muted); font-family: inherit;
+  padding: 3px 8px; border: 1px solid var(--border); border-radius: 20px;
+}
+
+/* ── Plan form ───────────────────────────────────────────────────────────────── */
+.plan-day-block {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 12px; padding: 12px; margin-bottom: 12px;
+}
+.pdb-header { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.pdb-toggle { display: flex; align-items: center; flex-shrink: 0; padding: 2px; }
+.pdb-chevron { font-size: 10px; color: var(--text-muted); }
+.pdb-name-wrap {
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px;
+  background: var(--bg-input, rgba(255,255,255,0.05));
+  border: 1px solid var(--border); border-radius: 8px;
+  padding: 0 10px;
+}
+.pdb-name-input {
+  flex: 1; min-width: 0; background: transparent; border: none; outline: none;
+  font-size: 17px; font-weight: 700; color: var(--text-primary);
+  font-family: inherit; padding: 9px 0;
+}
+.pdb-name-input::placeholder { color: var(--text-muted); font-weight: 400; }
+.pdb-ex-count { font-size: 12px; color: rgba(255,255,255,0.22); flex-shrink: 0; white-space: nowrap; }
+.pdb-ex-row {
+  display: flex; align-items: center; gap: 8px; margin-bottom: 8px;
+  padding: 8px 10px; background: var(--bg-card); border-radius: 10px;
+  border: 1px solid var(--border);
+}
+.pdb-handle {
+  font-size: 20px; color: #555; cursor: grab; flex-shrink: 0;
+  padding: 0 4px; user-select: none; line-height: 1; touch-action: none;
+}
+.pdb-handle:active { color: #888; cursor: grabbing; }
+
+.pdb-ghost {
+  position: fixed; z-index: 9999; pointer-events: none;
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 12px; border-radius: 10px;
+  background: var(--bg-card); border: 1.5px solid var(--accent);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+  opacity: 0.9;
+  transform: scale(1.02);
+  transform-origin: center center;
+}
+.pdb-ghost-label { font-size: 14px; font-weight: 600; color: var(--text-primary); }
+.pdb-ex-name { flex: 1; min-width: 0; margin-bottom: 0 !important; font-size: 16px; }
+
+/* ── Gym redesign ─────────────────────────────────────────────────────────── */
+
+/* Top area: stats + week strip */
+.gym-top { display: flex; flex-direction: column; gap: 14px; }
+
+/* Sub-tabs: Log | Plans */
+.gym-subtabs {
+  display: flex; border-bottom: 1px solid var(--border);
+  padding: 0 16px;
+}
+.gym-subtab {
+  flex: 1; padding: 10px 0; font-size: 14px; font-weight: 700;
+  color: var(--text-muted); font-family: inherit; text-align: center;
+  border-bottom: 2px solid transparent; margin-bottom: -1px; transition: color 0.15s;
+}
+.gym-subtab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+/* Date nav in log view */
+.gym-date-nav {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 0 14px; gap: 8px;
+}
+.gym-date-label { font-size: 17px; font-weight: 700; color: var(--text-primary); }
+
+/* Log options (Use Plan / Custom / Rest) */
+.gym-log-options { display: flex; flex-direction: column; gap: 10px; margin-top: 4px; }
+.gym-log-opt {
+  display: flex; align-items: center; gap: 14px;
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: 14px; padding: 14px 16px;
+  font-family: inherit; text-align: left; transition: border-color 0.15s;
+}
+.gym-log-opt:active { border-color: var(--accent); }
+.gym-log-opt--rest:active { border-color: #888; }
+.glo-icon  { font-size: 26px; flex-shrink: 0; }
+.glo-text  { display: flex; flex-direction: column; gap: 2px; }
+.glo-label { font-size: 16px; font-weight: 700; color: var(--text-primary); }
+.glo-sub   { font-size: 13px; color: var(--text-muted); }
+
+/* Logged workout card */
+.gym-logged { padding: 0; overflow: hidden; margin-bottom: 0; }
+.gym-logged-header {
+  display: flex; align-items: center; justify-content: space-between;
+  width: 100%; padding: 14px 16px; font-family: inherit; text-align: left;
+}
+.gym-logged-title { font-size: 16px; font-weight: 700; color: var(--text-primary); }
+.gym-logged-sub   { font-size: 13px; color: var(--text-muted); }
+.gym-logged-body  { padding: 0 16px 14px; }
+
+/* Plan/day chip picker */
+.gym-log-section  { margin-bottom: 14px; }
+.gym-log-label    { font-size: 12px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em; display: block; margin-bottom: 8px; }
+.gym-chips        { display: flex; flex-wrap: wrap; gap: 8px; }
+.gym-chip {
+  display: flex; flex-direction: column; align-items: center;
+  padding: 8px 14px; border-radius: 20px; font-size: 14px; font-weight: 600;
+  font-family: inherit; border: 1px solid var(--border); color: var(--text-primary);
+  background: var(--bg-card); transition: border-color 0.15s, background 0.15s;
+}
+.gym-chip--active { border-color: var(--accent); color: var(--accent); background: rgba(0,229,255,0.06); }
+.gym-chip-count   { font-size: 11px; color: var(--text-muted); font-weight: 400; margin-top: 1px; }
+
+/* Custom logger */
+.cl-title { font-size: 17px; font-weight: 700; margin-bottom: 12px; border-color: var(--accent); }
+.cl-title::placeholder { color: var(--text-muted); font-weight: 500; }
+.cl-ex-header { display: flex; align-items: center; gap: 8px; }
+.cl-ex-toggle { flex: 1; display: flex; align-items: center; justify-content: space-between; gap: 8px; font-family: inherit; text-align: left; min-width: 0; }
+.cl-placeholder { color: var(--text-muted); font-weight: 400; font-size: 14px; }
+.cl-ex-name-input { flex: 1; background: transparent; border: none; outline: none; font-size: 15px; font-weight: 700; color: var(--text-primary); font-family: inherit; min-width: 0; padding: 0; }
+.cl-ex-name-input::placeholder { color: var(--text-muted); font-weight: 500; }
+.cl-chevron-btn { flex-shrink: 0; padding: 2px 4px; font-family: inherit; background: transparent; border: none; color: var(--text-muted); cursor: pointer; }
+
+/* Cancel link */
+.gym-cancel-link {
+  display: block; width: 100%; text-align: center; padding: 12px 0;
+  font-size: 14px; color: var(--text-muted); font-family: inherit; margin-top: 4px;
+}
+
+/* Plan form */
+.pf-header {
+  display: flex; align-items: center; gap: 10px;
+  margin-bottom: 16px; padding-bottom: 14px;
+  border-bottom: 1px solid var(--border);
+}
+.pf-back  { font-size: 14px; color: var(--text-muted); font-family: inherit; font-weight: 600; flex-shrink: 0; }
+.pf-title { flex: 1; text-align: center; font-size: 16px; font-weight: 700; color: var(--text-primary); }
+.pf-save  {
+  font-size: 14px; font-weight: 700; font-family: inherit; flex-shrink: 0;
+  color: var(--accent); padding: 6px 14px;
+  border: 1.5px solid var(--accent); border-radius: 20px;
+}
+.pf-save:disabled { opacity: 0.4; }
+.pf-plan-name {
+  margin-bottom: 16px; font-size: 17px; font-weight: 700;
+  border-color: var(--accent); color: var(--text-primary);
+}
+.pf-plan-name::placeholder { color: var(--text-muted); font-weight: 600; }
+.pf-add-day {
+  display: block; width: 100%; padding: 12px; margin-top: 4px;
+  border: 1.5px dashed var(--border); border-radius: 12px;
+  font-size: 14px; font-weight: 700; color: var(--text-muted);
+  font-family: inherit; text-align: center; transition: border-color 0.15s, color 0.15s;
+}
+.pf-add-day:active { border-color: var(--accent); color: var(--accent); }
+.pf-delete {
+  display: block; width: 100%; padding: 14px;
+  margin-top: 20px; border-radius: 12px;
+  font-size: 15px; font-weight: 700; font-family: inherit;
+  color: var(--red); border: 1.5px solid rgba(255,56,100,0.35);
+  text-align: center; background: rgba(255,56,100,0.05);
+}
+
+/* ── Gym calendar strip ───────────────────────────────────────────────────── */
+.gym-cal-wrap  { display: flex; flex-direction: column; gap: 8px; }
+.gym-cal-header {
+  display: flex; align-items: center; gap: 6px;
+}
+.gym-cal-month {
+  flex: 1; text-align: center; font-size: 13px; font-weight: 700;
+  color: var(--text-primary); font-family: inherit;
+}
+
+/* Mini month calendar dropdown */
+.gym-mini-cal {
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: 14px; padding: 12px; margin-top: 2px;
+}
+.gmc-month-nav {
+  display: flex; align-items: center; gap: 8px;
+  margin-bottom: 10px;
+}
+.gmc-pickers { display: flex; gap: 8px; margin-bottom: 12px; }
+.calpick { flex: 1; position: relative; }
+.calpick-btn {
+  width: 100%; padding: 7px 10px; background: rgba(255,255,255,0.05);
+  border: 1px solid var(--border); border-radius: 10px;
+  font-size: 14px; font-weight: 700; color: var(--text-primary); font-family: inherit;
+  display: flex; align-items: center; justify-content: space-between; gap: 6px;
+}
+.calpick-caret { font-size: 11px; color: var(--text-muted); }
+.calpick-list {
+  position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 300;
+  background: #1a1a1a; border: 1px solid var(--border); border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.7);
+  max-height: 180px; overflow-y: auto; scrollbar-width: none;
+}
+.calpick-list::-webkit-scrollbar { display: none; }
+.calpick-item {
+  display: block; width: 100%; padding: 9px 14px; text-align: left;
+  font-size: 13px; font-weight: 600; font-family: inherit; color: var(--text-primary);
+}
+.calpick-item:not(:disabled):active { background: rgba(255,255,255,0.06); }
+.calpick-item--on { color: var(--accent); background: rgba(0,229,255,0.08); }
+.calpick-item--off { opacity: 0.25; }
+.gmc-nav-btn {
+  font-size: 20px; color: var(--text-muted); font-family: inherit;
+  padding: 0 6px; line-height: 1;
+}
+.gmc-nav-btn:disabled { opacity: 0.2; }
+.gmc-dow-row {
+  display: grid; grid-template-columns: repeat(7, 1fr);
+  margin-bottom: 4px;
+}
+.gmc-dow { text-align: center; font-size: 11px; font-weight: 700; color: var(--text-muted); }
+.gmc-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+.gmc-day {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 3px; padding: 5px 2px; border-radius: 8px; font-family: inherit;
+  position: relative; min-height: 36px;
+}
+.gmc-empty { min-height: 36px; }
+.gmc-day:not(:disabled):active { background: rgba(255,255,255,0.06); }
+.gmc-num { font-size: 13px; color: var(--text-primary); font-weight: 500; }
+.gmc-today .gmc-num { color: #ffe600; font-weight: 800; }
+.gmc-in-week { background: rgba(0,229,255,0.07); border-radius: 8px; }
+.gmc-future { opacity: 0.25; }
+.gmc-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--green); }
+.gmc-dot.gmc-dot--rest { background: #555; }
