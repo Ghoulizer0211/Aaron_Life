@@ -171,45 +171,106 @@
 .rh-info {
   flex: 1; display: flex; flex-direction: column; gap: 6px;
 }
-.rh-label  { font-size: 12px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.8px; }
-.rh-insight { font-size: 16px; font-weight: 600; color: var(--text-primary); line-height: 1.4; }
+.rh-label   { font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.8px; }
+.rh-title   { font-size: 16px; font-weight: 700; line-height: 1.2; }
+.rh-insight { font-size: 13px; font-weight: 400; color: var(--text-primary); line-height: 1.4; }
+.rh-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.rh-chip {
+  font-size: 12px; font-weight: 600; color: var(--text-primary);
+  background: rgba(255,255,255,0.08); border-radius: 999px;
+  padding: 4px 10px; white-space: nowrap;
+}
+.rh-chip--accent { color: var(--accent); }
 
-/* ── TODAY: Metrics grid ─────────────────────────────────────────────────────── */
-
-.metrics-grid {
+/* ── Overview two-column grid ────────────────────────────────────────────────── */
+.overview-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
+  grid-template-columns: 1fr;
 }
+@media (min-width: 680px) {
+  .overview-grid { grid-template-columns: 1fr 260px; align-items: start; }
+}
+.overview-col { display: flex; flex-direction: column; }
 
-.metric-tile {
+/* ── Overview: metric grid ───────────────────────────────────────────────────── */
+.ov-metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.ov-metrics--2x2 { grid-template-columns: repeat(2, 1fr); }
+.ov-metric {
   display: flex; flex-direction: column; align-items: center;
-  padding: 14px 8px 12px; gap: 3px; text-align: center;
+  padding: 14px 8px 12px; gap: 2px; text-align: center;
 }
-.mt-value {
-  font-size: 20px; font-weight: 700; color: var(--text-primary);
-  font-variant-numeric: tabular-nums; line-height: 1.1;
+.ovm-icon  { font-size: 20px; line-height: 1; }
+.ovm-value { font-size: 18px; font-weight: 700; color: var(--text-primary); font-variant-numeric: tabular-nums; margin-top: 4px; }
+.ovm-label { font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+.ovm-sub   { font-size: 11px; color: var(--text-muted); }
+
+/* ── Overview: Recovery insight card ────────────────────────────────────────── */
+.recovery-insight { display: flex; align-items: flex-start; gap: 10px; padding: 14px 16px; }
+.ri-icon  { font-size: 18px; flex-shrink: 0; margin-top: 1px; }
+.ri-text  { display: flex; flex-direction: column; gap: 2px; }
+.ri-main  { font-size: 14px; font-weight: 600; color: var(--text-primary); }
+.ri-sub   { font-size: 13px; color: var(--text-muted); }
+
+/* ── Overview: Gym Today right card ─────────────────────────────────────────── */
+.gym-today-right {
+  display: flex; flex-direction: column; gap: 10px; padding: 14px 16px;
 }
-.mt-label { font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
-.mt-sub   { font-size: 11px; color: var(--text-muted); }
+.gtr-header    { font-size: 13px; font-weight: 700; color: var(--text-primary); letter-spacing: 0.3px; }
+.gtr-day-name  { font-size: 14px; font-weight: 600; color: var(--text-primary); }
+.gtr-done-badge { font-size: 12px; font-weight: 600; color: var(--green); }
+.gtr-streak    { font-size: 12px; font-weight: 600; color: var(--text-muted); margin-top: 4px; }
+.gtr-edit-btn  {
+  font-size: 12px; font-weight: 600; color: var(--text-muted);
+  background: transparent; border: 1px solid var(--border);
+  border-radius: 8px; padding: 5px 10px; cursor: pointer; align-self: flex-start;
+}
+.gtr-empty     { font-size: 13px; color: var(--text-muted); }
+.gtr-start-btn {
+  font-size: 13px; font-weight: 700; color: #000;
+  background: var(--accent); border: none; border-radius: 8px;
+  padding: 9px 14px; cursor: pointer; text-align: center;
+}
+.gtr-start-btn:active { opacity: 0.85; }
 
-/* ── TODAY: Gym card ─────────────────────────────────────────────────────────── */
+/* ── Overview: Catholic Mass card ────────────────────────────────────────────── */
+.streak-verse-card { display: flex; flex-direction: column; gap: 0; padding: 0; }
 
-/* ── Today summary bar ──────────────────────────────────────────────────────── */
-.today-summary {
-  font-size: 12px; color: var(--text-muted); padding: 8px 16px 0;
-  line-height: 1.5; letter-spacing: 0.01em;
+/* ── Catholic scripture card ─────────────────────────────────────────────────── */
+.catholic-card {
+  display: flex; flex-direction: column; gap: 10px;
+  padding: 14px 16px;
+  border-left: 3px solid var(--accent);
+}
+.cc-loading      { font-size: 12px; color: var(--text-muted); padding: 14px 16px; border-left: 3px solid var(--accent); }
+.cc-loading--err { color: var(--red); }
+.cc-day-title {
+  font-size: 11px; font-weight: 700; color: var(--accent);
+  text-transform: uppercase; letter-spacing: 1px;
+}
+.cc-day-title::before { content: '✝ '; }
+.cc-saint      { font-size: 11px; color: var(--text-muted); }
+.cc-reading    { display: flex; flex-direction: column; gap: 6px; }
+.cc-reading-label  { font-size: 10px; font-weight: 700; color: var(--accent); text-transform: uppercase; letter-spacing: 0.8px; }
+.cc-reading-source { font-size: 12px; font-weight: 600; color: var(--text-primary); }
+.cc-reading-text {
+  font-size: 14px; color: var(--text-primary); line-height: 1.6;
+  font-style: italic;
+}
+.cc-ref {
+  font-size: 12px; color: var(--text-muted); margin-top: 2px;
 }
 
-/* ── Gym today card ─────────────────────────────────────────────────────────── */
+/* ── Auto-save status ────────────────────────────────────────────────────────── */
+.autosave-status { font-size: 11px; color: var(--text-muted); }
+.autosave-status--saved { color: var(--green); }
+
+/* ── Gym today card (gym tab) ────────────────────────────────────────────────── */
 .gym-today-card {
   display: flex; align-items: center; justify-content: space-between; padding: 14px 16px;
 }
 .gtc-left  { display: flex; flex-direction: column; gap: 4px; }
-.gtc-check-label { display: flex; align-items: center; gap: 10px; cursor: pointer; }
-.gtc-checkbox {
-  width: 18px; height: 18px; accent-color: var(--accent); cursor: pointer; flex-shrink: 0;
-}
+.gtc-check-label { display: flex; align-items: center; gap: 10px; }
+.gtc-checkbox { width: 18px; height: 18px; accent-color: var(--accent); flex-shrink: 0; pointer-events: none; }
 .gtc-title  { font-size: 15px; font-weight: 700; color: var(--text-primary); }
 .gtc-streak { font-size: 13px; color: var(--text-muted); padding-left: 28px; }
 .gtc-log-btn {
@@ -217,6 +278,13 @@
   background: transparent; border: 1px solid var(--accent);
   border-radius: 8px; padding: 6px 12px; cursor: pointer; white-space: nowrap;
 }
+
+/* ── TODAY: Metrics grid (kept for other tabs) ───────────────────────────────── */
+.metrics-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.metric-tile { display: flex; flex-direction: column; align-items: center; padding: 14px 8px 12px; gap: 3px; text-align: center; }
+.mt-value { font-size: 20px; font-weight: 700; color: var(--text-primary); font-variant-numeric: tabular-nums; line-height: 1.1; }
+.mt-label { font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+.mt-sub   { font-size: 11px; color: var(--text-muted); }
 .gtc-log-btn:hover { background: rgba(0,229,255,0.08); }
 
 /* ── Verse of the Day ───────────────────────────────────────────────────────── */

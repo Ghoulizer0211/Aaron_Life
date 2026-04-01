@@ -452,7 +452,6 @@ function SummaryCard({ label, value, sub, accent, onClick, icon }) {
 
 function AccountRow({ account, onCategoryChange }) {
   const [editing, setEditing] = useState(false)
-  const isCredit = account.category_group === 'credit' || account.subtype === 'credit_card'
   const bal = account.current_balance ?? account.balance ?? 0
   return (
     <div className="card row-card">
@@ -613,7 +612,7 @@ function MonthSelector({ month, onChange }) {
 
 function AccordionAccount({ account, transactions, onCategoryChange, onTxCategoryChange }) {
   const [open, setOpen] = useState(false)
-  const isCredit = account.category_group === 'credit' || account.subtype === 'credit_card'
+  const isCredit = account.category_group === 'credit' || account.subtype === 'credit_card' || account.type === 'credit'
   const bal = account.current_balance ?? account.balance ?? 0
   const acctTx = [...transactions]
     .filter(t => t.account_id === (account.account_id || account.id))

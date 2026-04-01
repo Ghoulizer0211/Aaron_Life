@@ -52,12 +52,30 @@ function fmtHrs(h) {
   return min > 0 ? `${hrs}h ${min}m` : `${hrs}h`
 }
 
+function readinessTitle(score) {
+  if (score == null) return null
+  if (score >= 85) return 'Excellent Recovery'
+  if (score >= 70) return 'Good Recovery'
+  if (score >= 50) return 'Fair Recovery'
+  return 'Low Recovery'
+}
+
 function readinessInsight(score) {
   if (score == null) return 'Sync your ring to see today\'s readiness.'
-  if (score >= 85) return 'Fully recovered. Great day to train hard 💪'
-  if (score >= 70) return 'Good recovery. Normal training is fine'
-  if (score >= 50) return 'Moderate recovery. Keep it light today'
-  return 'Low recovery. Rest day recommended 😴'
+  if (score >= 85) return 'Normal training is fine'
+  if (score >= 70) return 'Normal training is fine'
+  if (score >= 50) return 'Keep intensity moderate today'
+  return 'Rest day recommended'
+}
+
+function buildRecoveryInsight(readiness, sleep) {
+  if (readiness?.score == null) return null
+  const s = readiness.score
+  const shortSleep = sleep?.total_hours != null && sleep.total_hours < 7
+  if (s >= 85) return { main: 'Excellent recovery. Go all out today.', sub: null }
+  if (s >= 70) return { main: 'Recovery is good enough to train,', sub: shortSleep ? 'but sleep duration is the weak point today.' : 'and your metrics look solid.' }
+  if (s >= 50) return { main: 'Moderate recovery. Keep intensity low today,', sub: 'and prioritize sleep tonight.' }
+  return { main: 'Low recovery. Consider a rest day', sub: 'or very light activity only.' }
 }
 
 function sleepInsight(hours, score) {
@@ -95,10 +113,11 @@ function useOuraToday(linked, date) {
   const [loading, setLoading] = useState(false)
   const [error,   setError]   = useState(null)
 
-  const fetch_ = useCallback(async (d) => {
+  const fetch_ = useCallback(async (d, sync = false) => {
     setLoading(true); setError(null)
     try {
-      const res  = await fetch(`/api/oura/today?date=${d}`)
+      const url  = `/api/oura/today?date=${d}${sync ? '&sync=true' : ''}`
+      const res  = await fetch(url)
       const json = await res.json()
       if (json.error) throw new Error(json.error)
       setData(json)
@@ -109,13 +128,13 @@ function useOuraToday(linked, date) {
 
   useEffect(() => {
     if (!linked) return
-    // Use cached data instantly, then refresh in background
+    // Show localStorage instantly, then load from server (server checks Supabase cache first)
     const cached = localStorage.getItem(`aaron_health_${date}`)
     if (cached) { try { setData(JSON.parse(cached)) } catch { /* ignore */ } }
-    fetch_(date)
+    fetch_(date, false)
   }, [linked, date, fetch_])
 
-  return { data, loading, error, refetch: () => fetch_(date) }
+  return { data, loading, error, refetch: () => fetch_(date, true) }
 }
 
 function useOuraWeek(linked) {
@@ -226,7 +245,7 @@ function BarChart({ items, height = 56 }) {
 // â”€â”€ Tab bar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const TABS = [
-  { id: 'today',    label: 'Today' },
+  { id: 'today',    label: 'Overview' },
   { id: 'sleep',    label: 'Sleep' },
   { id: 'gym',      label: 'Gym' },
   { id: 'activity', label: 'Activity' },
@@ -296,97 +315,158 @@ function VerseCard() {
   )
 }
 
+function CatholicCard() {
+  const cacheKey = `catholic_${todayStr()}`
+  const [data, setData]       = useState(() => { try { return JSON.parse(localStorage.getItem(cacheKey) || 'null') } catch { return null } })
+  const [loading, setLoading] = useState(!data)
+  const [err, setErr]         = useState(null)
+
+  useEffect(() => {
+    // Clear cache if old format (has no gospel.excerpt at top level)
+    if (data && data.dayTitle === 'Daily Scripture') { setData(null); localStorage.removeItem(cacheKey); return }
+    if (data) return
+    fetch('/api/catholic')
+      .then(r => r.json())
+      .then(j => {
+        if (j.error) { setErr(j.error); return }
+        setData(j)
+        localStorage.setItem(cacheKey, JSON.stringify(j))
+      })
+      .catch(e => setErr(e.message))
+      .finally(() => setLoading(false))
+  }, []) // eslint-disable-line
+
+  if (loading) return <div className="cc-loading">Loading scripture…</div>
+  if (err)     return <div className="cc-loading cc-loading--err">Could not load scripture</div>
+  if (!data)   return null
+
+  const text = data.gospel?.excerpt || data.firstReading?.excerpt || null
+  const ref  = data.gospel?.source  || data.firstReading?.source  || null
+
+  return (
+    <div className="catholic-card">
+      <div className="cc-day-title">{data.dayTitle || 'Verse of the Day'}</div>
+      {text && <div className="cc-reading-text">"{text}"</div>}
+      {ref  && <div className="cc-ref">{ref}</div>}
+    </div>
+  )
+}
+
 function TodayTab({ oura, logs, date, onOpenGym }) {
   const { data, loading, error } = oura
   const { readiness, sleep, activity } = data || {}
   const streak = calcStreakFromLogs(logs)
   const rColor = scoreColor(readiness?.score)
+  const todayLog = logs.find(l => l.date === date)
+  const workoutDone = !!todayLog
+  const insight = buildRecoveryInsight(readiness, sleep)
 
-  const [workoutDone,  setWorkoutDone]  = useState(!!data?.workout_today)
-  const [workoutLogId, setWorkoutLogId] = useState(data?.workout_log_id || null)
-  const [wkLoading,    setWkLoading]    = useState(false)
+  const chips = []
+  if (sleep?.score != null)   chips.push({ icon: '🌙', label: `Sleep ${sleep.score}` })
+  if (sleep?.avg_hrv != null) chips.push({ icon: '〰️', label: `HRV ${Math.round(sleep.avg_hrv)} ms`, accent: true })
 
-  useEffect(() => {
-    setWorkoutDone(!!data?.workout_today)
-    setWorkoutLogId(data?.workout_log_id || null)
-  }, [data])
-
-  const toggleWorkout = async () => {
-    if (wkLoading) return
-    const newDone = !workoutDone
-    setWorkoutDone(newDone)
-    setWkLoading(true)
-    try {
-      if (newDone) {
-        const res  = await fetch('/api/gym/logs', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ date, day_name: 'Workout Done', notes: '' }),
-        })
-        const json = await res.json()
-        if (json.id) setWorkoutLogId(json.id)
-      } else if (workoutLogId) {
-        await fetch(`/api/gym/logs/${workoutLogId}`, { method: 'DELETE' })
-        setWorkoutLogId(null)
-      }
-    } catch { setWorkoutDone(!newDone) }
-    finally { setWkLoading(false) }
-  }
-
-  const parts = []
-  if (sleep?.total_hours != null)       parts.push(`Slept ${fmtHrs(sleep.total_hours)}`)
-  if (sleep?.avg_hrv != null)           parts.push(`HRV ${Math.round(sleep.avg_hrv)} ms`)
-  if (sleep?.resting_hr != null)        parts.push(`HR ${sleep.resting_hr} bpm`)
-  if (activity?.steps != null)          parts.push(`${activity.steps.toLocaleString()} steps`)
-  if (activity?.total_calories != null) parts.push(`${activity.total_calories} kcal`)
-  parts.push(workoutDone ? 'Workout ✓' : 'Workout not logged')
+  const sleepDebt = sleep?.total_hours != null ? Math.max(0, 8 - sleep.total_hours) : null
 
   return (
     <div className="health-scroll">
       {error && <div className="health-error" style={{margin:'12px 16px'}}>{error}</div>}
+      <div className="overview-grid">
 
-      {data && <div className="today-summary">{parts.join(' • ')}</div>}
+        {/* ── Left column ── */}
+        <div className="overview-col">
+          <section className="page-section">
+            <div className="card readiness-hero">
+              <div className="rh-ring">
+                <ScoreRing score={readiness?.score ?? null} color={rColor} size={90} />
+              </div>
+              <div className="rh-info">
+                <span className="rh-label">Readiness</span>
+                {readinessTitle(readiness?.score) && <span className="rh-title" style={{ color: rColor }}>{readinessTitle(readiness?.score)}</span>}
+                <span className="rh-insight">{readinessInsight(readiness?.score)}</span>
+                {chips.length > 0 && (
+                  <div className="rh-chips">
+                    {chips.map((c, i) => (
+                      <span key={i} className={`rh-chip${c.accent ? ' rh-chip--accent' : ''}`}>
+                        {c.icon} {c.label}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </section>
 
-      {/* Readiness hero */}
-      <section className="page-section">
-        <div className="card readiness-hero">
-          <div className="rh-ring">
-            <ScoreRing score={readiness?.score ?? null} color={rColor} size={100} />
-          </div>
-          <div className="rh-info">
-            <span className="rh-label">Readiness</span>
-            <span className="rh-insight">{readinessInsight(readiness?.score)}</span>
-          </div>
+          <section className="page-section">
+            <div className="ov-metrics ov-metrics--2x2">
+              <div className="card ov-metric">
+                <span className="ovm-icon" style={{color:'#f472b6'}}>❤️</span>
+                <span className="ovm-value">{sleep?.resting_hr != null ? sleep.resting_hr : '—'}</span>
+                <span className="ovm-label">Resting HR</span>
+                {sleep?.resting_hr != null && <span className="ovm-sub">bpm</span>}
+              </div>
+              <div className="card ov-metric">
+                <span className="ovm-icon" style={{color:'var(--accent)'}}>🏃</span>
+                <span className="ovm-value">{activity?.steps != null ? activity.steps.toLocaleString() : '—'}</span>
+                <span className="ovm-label">Steps</span>
+              </div>
+              <div className="card ov-metric">
+                <span className="ovm-icon" style={{color:'#fb923c'}}>🔥</span>
+                <span className="ovm-value">{activity?.active_calories != null ? activity.active_calories : '—'}</span>
+                <span className="ovm-label">Calories</span>
+                {activity?.active_calories != null && <span className="ovm-sub">kcal</span>}
+              </div>
+              <div className="card ov-metric">
+                <span className="ovm-icon" style={{color:'#818cf8'}}>💤</span>
+                <span className="ovm-value">{sleepDebt != null ? (sleepDebt === 0 ? '0h' : fmtHrs(sleepDebt)) : '—'}</span>
+                <span className="ovm-label">Sleep Debt</span>
+              </div>
+            </div>
+          </section>
+
+          {insight && (
+            <section className="page-section">
+              <div className="card recovery-insight">
+                <span className="ri-icon">💡</span>
+                <div className="ri-text">
+                  <span className="ri-main">{insight.main}</span>
+                  {insight.sub && <span className="ri-sub">{insight.sub}</span>}
+                </div>
+              </div>
+            </section>
+          )}
         </div>
-      </section>
 
-      {/* Metrics grid */}
-      <section className="page-section">
-        <div className="metrics-grid">
-          <MetricTile label="Sleep" value={fmtHrs(sleep?.total_hours)} sub={sleep?.score != null ? `Score ${sleep.score}` : null} color={scoreColor(sleep?.score)} />
-          <MetricTile label="Steps" value={activity?.steps != null ? activity.steps.toLocaleString() : '—'} sub={activity?.steps != null ? `${Math.round((activity.steps/10000)*100)}% of goal` : null} color={scoreColor(activity?.score)} />
-          <MetricTile label="Active Cal" value={activity?.active_calories != null ? `${activity.active_calories}` : '—'} sub="kcal" />
-          <MetricTile label="Total Cal" value={activity?.total_calories != null ? `${activity.total_calories}` : '—'} sub="kcal" />
-          <MetricTile label="Resting HR" value={sleep?.resting_hr != null ? `${sleep.resting_hr}` : '—'} sub="bpm" />
-          <MetricTile label="HRV" value={sleep?.avg_hrv != null ? `${Math.round(sleep.avg_hrv)}` : '—'} sub="ms" />
+        {/* ── Right column ── */}
+        <div className="overview-col">
+          <section className="page-section">
+            <div className="card gym-today-right">
+              <span className="gtr-header">🏋️ Gym</span>
+              {workoutDone ? (
+                <>
+                  <span className="gtr-day-name">{todayLog.day_name}</span>
+                  <span className="gtr-done-badge">Done ✓</span>
+                  <button className="gtr-edit-btn" onClick={onOpenGym}>Edit →</button>
+                </>
+              ) : (
+                <>
+                  <span className="gtr-empty">No workout logged yet</span>
+                  <button className="gtr-start-btn" onClick={onOpenGym}>+ Log Workout</button>
+                </>
+              )}
+              <div className="gtr-streak">
+                🔔 {streak > 0 ? `${streak} day streak` : 'No streak yet'}
+              </div>
+            </div>
+          </section>
+
+          <section className="page-section">
+            <div className="card streak-verse-card">
+              <CatholicCard />
+            </div>
+          </section>
         </div>
-      </section>
 
-      {/* Gym today */}
-      <section className="page-section">
-        <div className="card gym-today-card">
-          <div className="gtc-left">
-            <label className="gtc-check-label">
-              <input type="checkbox" className="gtc-checkbox" checked={workoutDone} onChange={toggleWorkout} disabled={wkLoading} />
-              <span className="gtc-title">Workout Done</span>
-            </label>
-            <span className="gtc-streak">{streak > 0 ? `🔥 ${streak} day streak` : 'No streak yet'}</span>
-          </div>
-          <button className="gtc-log-btn" onClick={onOpenGym}>Log Workout →</button>
-        </div>
-      </section>
-
-      <VerseCard />
-
+      </div>
       {!loading && !data && (
         <div className="health-empty" style={{margin:'0 16px'}}>No data for this day. Try a different date.</div>
       )}
@@ -890,7 +970,7 @@ function ExerciseCard({ exercise, lastPerf, state, onChange }) {
 }
 
 // PlanDayLogger — pick plan then day, log exercises, save
-function PlanDayLogger({ plans, date, onSave, saving, onCancel }) {
+function PlanDayLogger({ plans, date, onSave, onAutoSave, onDone, saving, onCancel }) {
   const [planId, setPlanId] = useState(() => (plans.find(p => p.is_active) || plans[0])?.id || '')
   const plan                 = plans.find(p => p.id === planId) || null
   const [dayId, setDayId]   = useState(null)
@@ -899,10 +979,36 @@ function PlanDayLogger({ plans, date, onSave, saving, onCancel }) {
   const [states, setStates]  = useState({})
   const [notes, setNotes]    = useState('')
   const [err, setErr]        = useState(null)
+  const autoSavedIdRef       = useRef(null)
+  const [autoSaveStatus, setAutoSaveStatus] = useState(null)
+  const isMounted            = useRef(true)
+  useEffect(() => () => { isMounted.current = false }, [])
 
   const handlePlanChange = (id) => { setPlanId(id); setDayId(null); setStates({}) }
 
+  useEffect(() => {
+    if (!day || !onAutoSave) return
+    const timer = setTimeout(async () => {
+      if (!isMounted.current) return
+      setAutoSaveStatus('saving')
+      const exercises = day.exercises.map(ex => ({
+        exercise_name: ex.exercise_name,
+        sets_data:     states[ex.exercise_name]?.sets || [],
+        skipped:       states[ex.exercise_name]?.action === 'skip',
+      }))
+      const newId = await onAutoSave(
+        { date, plan_id: plan.id, plan_name: plan.name, day_id: day.id, day_name: day.day_name, notes: notes.trim() || null, exercises },
+        autoSavedIdRef.current
+      )
+      if (!isMounted.current) return
+      if (newId) { autoSavedIdRef.current = newId; setAutoSaveStatus('saved') }
+      else setAutoSaveStatus(null)
+    }, 1500)
+    return () => clearTimeout(timer)
+  }, [states, notes, dayId])
+
   const handleSave = async () => {
+    if (autoSavedIdRef.current) { onDone(); return }
     if (!day) { setErr('Pick a day first'); return }
     setErr(null)
     const exercises = day.exercises.map(ex => ({
@@ -932,7 +1038,7 @@ function PlanDayLogger({ plans, date, onSave, saving, onCancel }) {
           <div className="gym-chips">
             {(plan.days || []).map(d => (
               <button key={d.id} className={`gym-chip${dayId === d.id ? ' gym-chip--active' : ''}`}
-                onClick={() => { setDayId(d.id); setStates({}) }}>
+                onClick={() => { setDayId(d.id); setStates({}); autoSavedIdRef.current = null; setAutoSaveStatus(null) }}>
                 {d.day_name}
                 <span className="gym-chip-count">{d.exercises.length} ex</span>
               </button>
@@ -952,9 +1058,13 @@ function PlanDayLogger({ plans, date, onSave, saving, onCancel }) {
           <textarea className="form-input form-textarea" placeholder="Session notes (optional)…"
             value={notes} onChange={e => setNotes(e.target.value)} style={{ marginTop: 8 }} />
           {err && <p className="form-error">{err}</p>}
-          <button className="connect-btn health-connect-btn" onClick={handleSave} disabled={saving}>
-            {saving ? 'Saving…' : 'Save Session'}
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8 }}>
+            <button className="connect-btn health-connect-btn" onClick={handleSave} disabled={saving} style={{ margin: 0 }}>
+              {saving ? 'Saving…' : autoSavedIdRef.current ? 'Done' : 'Save Session'}
+            </button>
+            {autoSaveStatus === 'saving' && <span className="autosave-status">Saving…</span>}
+            {autoSaveStatus === 'saved'  && <span className="autosave-status autosave-status--saved">Saved ✓</span>}
+          </div>
         </div>
       )}
 
@@ -964,7 +1074,7 @@ function PlanDayLogger({ plans, date, onSave, saving, onCancel }) {
 }
 
 // CustomLogger — draggable, collapsible exercises with set logging
-function CustomLogger({ date, onSave, saving, onCancel, initialData }) {
+function CustomLogger({ date, onSave, onAutoSave, onDone, saving, onCancel, initialData }) {
   const [dayName,   setDayName]   = useState(initialData?.day_name || '')
   const [exercises, setExercises] = useState(() => {
     if (initialData?.exercises?.length) {
@@ -988,7 +1098,11 @@ function CustomLogger({ date, onSave, saving, onCancel, initialData }) {
   })
   const [notes,     setNotes]     = useState(initialData?.notes || '')
   const [err,       setErr]       = useState(null)
-  const nextKey    = useRef(initialData?.exercises?.filter(e => !e.skipped).length || 1)
+  const nextKey        = useRef(initialData?.exercises?.filter(e => !e.skipped).length || 1)
+  const autoSavedIdRef = useRef(initialData?.id || null)
+  const [autoSaveStatus, setAutoSaveStatus] = useState(null)
+  const isMounted      = useRef(true)
+  useEffect(() => () => { isMounted.current = false }, [])
   const ghostElRef = useRef(null)
   const exRowRefs  = useRef({})
   const dragRef    = useRef(null)
@@ -1030,7 +1144,26 @@ function CustomLogger({ date, onSave, saving, onCancel, initialData }) {
   const updSet   = (i, si, f, v) => setExercises(e => e.map((ex, j) => j === i ? { ...ex, sets: ex.sets.map((s, k) => k === si ? { ...s, [f]: v } : s) } : ex))
   const toggleEx = (i) => setOpenExs(s => { const n = new Set(s); n.has(i) ? n.delete(i) : n.add(i); return n })
 
+  useEffect(() => {
+    const valid = exercises.filter(e => e.name.trim())
+    if (!valid.length || !onAutoSave) return
+    const timer = setTimeout(async () => {
+      if (!isMounted.current) return
+      setAutoSaveStatus('saving')
+      const exData = valid.map(ex => ({ exercise_name: ex.name.trim(), sets_data: ex.sets.filter(s => s.weight || s.reps), skipped: false }))
+      const newId = await onAutoSave(
+        { date, day_name: dayName.trim() || 'Custom', notes: notes.trim() || null, exercises: exData },
+        autoSavedIdRef.current
+      )
+      if (!isMounted.current) return
+      if (newId) { autoSavedIdRef.current = newId; setAutoSaveStatus('saved') }
+      else setAutoSaveStatus(null)
+    }, 1500)
+    return () => clearTimeout(timer)
+  }, [exercises, dayName, notes])
+
   const handleSave = async () => {
+    if (autoSavedIdRef.current) { onDone(); return }
     const valid = exercises.filter(e => e.name.trim())
     if (!valid.length) { setErr('Add at least one exercise'); return }
     setErr(null)
@@ -1105,9 +1238,13 @@ function CustomLogger({ date, onSave, saving, onCancel, initialData }) {
       <textarea className="form-input form-textarea" placeholder="Session notes (optional)…"
         value={notes} onChange={e => setNotes(e.target.value)} style={{ marginTop: 8 }} />
       {err && <p className="form-error">{err}</p>}
-      <button className="connect-btn health-connect-btn" onClick={handleSave} disabled={saving} style={{ marginTop: 8 }}>
-        {saving ? 'Saving…' : 'Save Session'}
-      </button>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8 }}>
+        <button className="connect-btn health-connect-btn" onClick={handleSave} disabled={saving} style={{ margin: 0 }}>
+          {saving ? 'Saving…' : autoSavedIdRef.current ? 'Done' : 'Save Session'}
+        </button>
+        {autoSaveStatus === 'saving' && <span className="autosave-status">Saving…</span>}
+        {autoSaveStatus === 'saved'  && <span className="autosave-status autosave-status--saved">Saved ✓</span>}
+      </div>
       <button className="gym-cancel-link" onClick={onCancel}>Cancel</button>
 
       {dragState && createPortal(
@@ -1334,6 +1471,16 @@ function GymLogView({ plansHook, logsHook, saving, onSave, onDelete, date, onDat
 
   const handleDateChange = (d) => { onDateChange(d); setMode(null) }
   const handleSave       = async (data, replaceId) => { const err = await onSave(data, replaceId); if (!err) setMode(null); return err }
+  const handleDone       = () => { logsHook.refetch(); setMode(null) }
+  const handleAutoSave   = async (data, prevId) => {
+    try {
+      if (prevId) await fetch(`/api/gym/logs/${prevId}`, { method: 'DELETE' })
+      const res  = await fetch('/api/gym/logs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })
+      const json = await res.json()
+      if (json.error || !json.id) return null
+      return json.id
+    } catch { return null }
+  }
 
   return (
     <div>
@@ -1350,13 +1497,13 @@ function GymLogView({ plansHook, logsHook, saving, onSave, onDelete, date, onDat
       {existingLog && mode !== 'edit' ? (
         <LoggedWorkout log={existingLog} onDelete={onDelete} onEdit={() => setMode('edit')} />
       ) : existingLog && mode === 'edit' ? (
-        <CustomLogger date={date} onSave={(data) => handleSave(data, existingLog.id)} saving={saving} onCancel={() => setMode(null)} initialData={existingLog} />
+        <CustomLogger date={date} onSave={(data) => handleSave(data, existingLog.id)} onAutoSave={handleAutoSave} onDone={handleDone} saving={saving} onCancel={() => setMode(null)} initialData={existingLog} />
       ) : mode === 'plan' ? (
         plansHook.plans.length === 0
           ? <p className="health-empty">No plans yet — create one in the Plans tab.</p>
-          : <PlanDayLogger plans={plansHook.plans} date={date} onSave={handleSave} saving={saving} onCancel={() => setMode(null)} />
+          : <PlanDayLogger plans={plansHook.plans} date={date} onSave={handleSave} onAutoSave={handleAutoSave} onDone={handleDone} saving={saving} onCancel={() => setMode(null)} />
       ) : mode === 'custom' ? (
-        <CustomLogger date={date} onSave={handleSave} saving={saving} onCancel={() => setMode(null)} />
+        <CustomLogger date={date} onSave={handleSave} onAutoSave={handleAutoSave} onDone={handleDone} saving={saving} onCancel={() => setMode(null)} />
       ) : (
         <div className="gym-log-options">
           <button className="gym-log-opt" onClick={() => setMode('plan')}>

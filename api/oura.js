@@ -19,31 +19,35 @@ export default async function handler(req, res) {
 
   // GET /api/oura/today
   if (sub === 'today' && req.method === 'GET') {
-    const token = await getOuraToken()
+    const token     = await getOuraToken()
     if (!token) return res.status(404).json({ error: 'Not connected' })
 
-    const today      = req.query.date || new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' })
-    const yesterday  = new Date(new Date(today + 'T12:00:00').getTime() - 86400000).toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' })
-    const twoDaysAgo = new Date(new Date(today + 'T12:00:00').getTime() - 2 * 86400000).toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' })
-    const tomorrow   = new Date(new Date(today + 'T12:00:00').getTime() + 86400000).toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' })
+    const today     = req.query.date || new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' })
+    const forceSync = req.query.sync === 'true'
+    const supabase  = getSupabase()
+
+    // Always fetch workout status fresh (changes during the day)
+    const getWorkout = async () => {
+      if (!supabase) return { workout_today: false, workout_log_id: null }
+      const { data: gw } = await supabase.from('workout_logs').select('id').eq('date', today).limit(1)
+      return { workout_today: (gw || []).length > 0, workout_log_id: gw?.[0]?.id || null }
+    }
 
     try {
-      // ── 1. Check Supabase cache for past dates ────────────────────────────────
-      const supabase = getSupabase()
-      const realToday = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' })
-      if (supabase && today !== realToday) {
-        const { data: cached } = await supabase.from('sleep_records').select('*').eq('date', today).maybeSingle()
-        if (cached && cached.total_hours != null) {
-          const { synced_at: _s, ...sleepData } = cached
-          let workout_today = false
-          const { data: gw } = await supabase.from('workout_logs').select('id').eq('date', today).limit(1)
-          workout_today = (gw || []).length > 0
-          const workout_log_id = gw?.[0]?.id || null
-          return res.json({ date: today, workout_today, workout_log_id, readiness: null, sleep: sleepData, activity: null })
+      // ── 1. Serve from Supabase cache (skip if sync requested) ─────────────────
+      if (!forceSync && supabase) {
+        const { data: cached } = await supabase.from('oura_daily').select('readiness,sleep,activity').eq('date', today).maybeSingle()
+        if (cached) {
+          const workout = await getWorkout()
+          return res.json({ date: today, ...workout, readiness: cached.readiness, sleep: cached.sleep, activity: cached.activity })
         }
       }
 
-      // ── 2. Fetch from Oura ────────────────────────────────────────────────────
+      // ── 2. Fetch from Oura API ────────────────────────────────────────────────
+      const yesterday  = new Date(new Date(today + 'T12:00:00').getTime() - 86400000).toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' })
+      const twoDaysAgo = new Date(new Date(today + 'T12:00:00').getTime() - 2 * 86400000).toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' })
+      const tomorrow   = new Date(new Date(today + 'T12:00:00').getTime() + 86400000).toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' })
+
       const [readinessR, dailySleepR, sleepR, activityR] = await Promise.allSettled([
         ouraFetch(`/v2/usercollection/daily_readiness?start_date=${yesterday}&end_date=${today}`, token),
         ouraFetch(`/v2/usercollection/daily_sleep?start_date=${yesterday}&end_date=${today}`, token),
@@ -55,12 +59,7 @@ export default async function handler(req, res) {
       const dailySleep    = dailySleepR.status === 'fulfilled' ? (dailySleepR.value.data || []).slice(-1)[0] : null
       const sleepSessions = sleepR.status      === 'fulfilled' ? (sleepR.value.data      || [])             : []
       const activity      = activityR.status   === 'fulfilled' ? (activityR.value.data   || []).slice(-1)[0] : null
-      console.log('[oura] today:', today, 'sessions count:', sleepSessions.length, sleepR.status === 'rejected' ? sleepR.reason?.message : '')
-      sleepSessions.forEach((s, i) => console.log(`[oura] session[${i}] type=${s.type} day=${s.day} total_sleep=${s.total_sleep_duration}`))
 
-      // Pick exactly one session for the selected date.
-      // Rules: day must match, ignore tiny partials (<300s), prefer long_sleep,
-      // break ties by largest total_sleep_duration.
       const pickMainSleepSession = (sessions, selectedDate) => {
         const forDay = sessions.filter(s => s.day === selectedDate && (s.total_sleep_duration || 0) >= 300)
         if (!forDay.length) return null
@@ -70,14 +69,11 @@ export default async function handler(req, res) {
       }
       const mainSleep = pickMainSleepSession(sleepSessions, today)
 
-      let workout_today = false, workout_log_id = null
-      if (supabase) {
-        const { data: gw } = await supabase.from('workout_logs').select('id').eq('date', today).limit(1)
-        workout_today = (gw || []).length > 0
-        workout_log_id = gw?.[0]?.id || null
-      }
-
       const fmtTime = (iso) => iso ? new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }) : null
+
+      const readinessPayload = readiness ? {
+        score: readiness.score, temperature_deviation: readiness.temperature_deviation, contributors: readiness.contributors,
+      } : null
 
       const sleepPayload = (mainSleep || dailySleep) ? {
         score:        dailySleep?.score        ?? null,
@@ -95,27 +91,25 @@ export default async function handler(req, res) {
         wake_time:    fmtTime(mainSleep?.bedtime_end),
       } : null
 
-      // ── 3. Cache to Supabase ──────────────────────────────────────────────────
-      if (supabase && sleepPayload) {
-        await supabase.from('sleep_records').upsert({ date: today, ...sleepPayload }, { onConflict: 'date' })
+      const activityPayload = activity ? {
+        score: activity.score, steps: activity.steps,
+        active_calories: activity.active_calories, total_calories: activity.total_calories,
+        target_calories: activity.target_calories,
+        walking_miles: activity.walking_equivalent_meters ? Math.round((activity.walking_equivalent_meters / 1609.34) * 10) / 10 : null,
+        high_minutes: activity.high ?? null, medium_minutes: activity.medium ?? null,
+        low_minutes: activity.low   ?? null, non_wear:       activity.non_wear ?? null,
+      } : null
+
+      // ── 3. Save to Supabase ───────────────────────────────────────────────────
+      if (supabase) {
+        await supabase.from('oura_daily').upsert(
+          { date: today, readiness: readinessPayload, sleep: sleepPayload, activity: activityPayload, synced_at: new Date().toISOString() },
+          { onConflict: 'date' }
+        )
       }
 
-      return res.json({
-        date: today,
-        workout_today,
-        workout_log_id,
-        readiness: readiness ? { score: readiness.score, temperature_deviation: readiness.temperature_deviation, contributors: readiness.contributors } : null,
-        sleep: sleepPayload,
-        activity: activity ? {
-          score: activity.score, steps: activity.steps,
-          active_calories: activity.active_calories, total_calories: activity.total_calories,
-          target_calories: activity.target_calories,
-          walking_miles: activity.walking_equivalent_meters
-            ? Math.round((activity.walking_equivalent_meters / 1609.34) * 10) / 10 : null,
-          high_minutes: activity.high ?? null, medium_minutes: activity.medium ?? null,
-          low_minutes:  activity.low  ?? null, non_wear:       activity.non_wear ?? null,
-        } : null,
-      })
+      const workout = await getWorkout()
+      return res.json({ date: today, ...workout, readiness: readinessPayload, sleep: sleepPayload, activity: activityPayload })
     } catch (err) {
       return res.status(500).json({ error: err.message })
     }

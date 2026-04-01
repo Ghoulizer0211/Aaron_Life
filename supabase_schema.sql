@@ -153,3 +153,16 @@ create table if not exists sleep_records (
 );
 
 alter table sleep_records disable row level security;
+
+
+-- ── 8. Oura daily cache (full payload: readiness + sleep + activity) ───────────
+
+create table if not exists oura_daily (
+  date       date primary key,
+  readiness  jsonb,
+  sleep      jsonb,
+  activity   jsonb,
+  synced_at  timestamptz default now()
+);
+
+alter table oura_daily disable row level security;

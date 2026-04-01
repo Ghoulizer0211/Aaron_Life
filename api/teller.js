@@ -43,7 +43,8 @@ async function incrementalSync(supabase, creds) {
         availableBalance = parseFloat(bal.available ?? bal.ledger   ?? 0)
       }
 
-      const isCreditCard = acc.type === 'credit' || acc.subtype === 'credit_card'
+      const flipSign = (acc.type === 'credit' || acc.subtype === 'credit_card') &&
+                       acc.institution_name?.toLowerCase().includes('navy')
       let txObjs = []
       if (txResult.status === 'fulfilled') {
         txObjs = txResult.value
@@ -53,7 +54,7 @@ async function incrementalSync(supabase, creds) {
             account_id:     tx.account_id,
             date:           tx.date,
             description:    tx.description,
-            amount:         isCreditCard ? -parseFloat(tx.amount) : parseFloat(tx.amount),
+            amount:         flipSign ? -parseFloat(tx.amount) : parseFloat(tx.amount),
             category:       mapTellerCategory(tx.details?.category),
             pending:        tx.status === 'pending',
             is_transfer:    tx.details?.category?.toLowerCase().includes('transfer') || false,
@@ -150,15 +151,16 @@ async function fullSync(supabase, creds, preFetched = {}) {
             last_four: acc.last_four, institution_name, last_synced_at: new Date().toISOString(),
           }
 
+          const flipSign = (acc.type === 'credit' || acc.subtype === 'credit_card') &&
+                           institution_name?.toLowerCase().includes('navy')
           let txObjs = []
           if (txResult.status === 'fulfilled') {
-            const isCreditCard = acc.type === 'credit' || acc.subtype === 'credit_card'
             txObjs = txResult.value
               .filter(tx => tx.date >= '2026-01-01')
               .map(tx => ({
                 transaction_id: tx.id, account_id: tx.account_id, date: tx.date,
                 description: tx.description,
-                amount: isCreditCard ? -parseFloat(tx.amount) : parseFloat(tx.amount),
+                amount: flipSign ? -parseFloat(tx.amount) : parseFloat(tx.amount),
                 category: mapTellerCategory(tx.details?.category),
                 pending: tx.status === 'pending',
                 is_transfer: tx.details?.category?.toLowerCase().includes('transfer') || false,

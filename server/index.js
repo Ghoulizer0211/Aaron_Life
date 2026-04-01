@@ -352,14 +352,11 @@ async function fetchAllTellerData(preFetchedAccounts = {}) {
           const txPath = `/accounts/${acc.id}/transactions?start_date=${startDate}`
 
           const rawTx = await tellerFetch(txPath, enrollment.accessToken)
-          const filteredTx = rawTx
           console.log(`[teller] got ${rawTx.length} tx for ${acc.name} (start_date=${startDate})`)
 
-          // Credit cards report charges as positive — flip sign so our convention
-          // is consistent: negative = spending, positive = income/payment.
-          const isCreditCard = acc.type === 'credit' || acc.subtype === 'credit_card'
-
-          const txObjs = filteredTx.map(tx => {
+          const flipSign = (acc.type === 'credit' || acc.subtype === 'credit_card') &&
+                           enrollment.institutionName?.toLowerCase().includes('navy')
+          const txObjs = rawTx.map(tx => {
             // Prefer Teller's counterparty name (clean merchant name) over raw bank description
             const displayName = tx.details?.counterparty?.name || tx.description
             return {
@@ -367,7 +364,7 @@ async function fetchAllTellerData(preFetchedAccounts = {}) {
               transaction_id: tx.id,
               name:           displayName,
               description:    displayName,
-              amount:         isCreditCard ? -parseFloat(tx.amount) : parseFloat(tx.amount),
+              amount:         flipSign ? -parseFloat(tx.amount) : parseFloat(tx.amount),
               category:       mapTellerCategory(tx.details?.category),
               date:           tx.date,
               accountId:      tx.account_id,
@@ -1065,11 +1062,31 @@ app.get('/api/oura/today', async (req, res) => {
   if (!token) return res.status(404).json({ error: 'Not connected' })
 
   const today      = req.query.date || new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' })
-  const yesterday  = new Date(new Date(today + 'T12:00:00').getTime() - 86400000).toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' })
-  const twoDaysAgo = new Date(new Date(today + 'T12:00:00').getTime() - 2 * 86400000).toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' })
-  const tomorrow   = new Date(new Date(today + 'T12:00:00').getTime() + 86400000).toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' })
+  const forceSync  = req.query.sync === 'true'
+
+  // Always fetch workout status fresh (changes during the day)
+  const getWorkout = async () => {
+    if (!supabase) return { workout_today: false, workout_log_id: null }
+    const { data: gw } = await supabase.from('workout_logs').select('id').eq('date', today).limit(1)
+    return { workout_today: (gw || []).length > 0, workout_log_id: gw?.[0]?.id || null }
+  }
 
   try {
+    // ── 1. Serve from Supabase cache (skip if sync requested) ──────────────────
+    if (!forceSync && supabase) {
+      const { data: cached } = await supabase.from('oura_daily').select('readiness,sleep,activity').eq('date', today).maybeSingle()
+      if (cached) {
+        console.log('[oura] serving from cache for', today)
+        const workout = await getWorkout()
+        return res.json({ date: today, ...workout, readiness: cached.readiness, sleep: cached.sleep, activity: cached.activity })
+      }
+    }
+
+    // ── 2. Fetch from Oura API ─────────────────────────────────────────────────
+    const yesterday  = new Date(new Date(today + 'T12:00:00').getTime() - 86400000).toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' })
+    const twoDaysAgo = new Date(new Date(today + 'T12:00:00').getTime() - 2 * 86400000).toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' })
+    const tomorrow   = new Date(new Date(today + 'T12:00:00').getTime() + 86400000).toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' })
+
     const [readinessR, dailySleepR, sleepR, activityR] = await Promise.allSettled([
       ouraFetch(`/v2/usercollection/daily_readiness?start_date=${yesterday}&end_date=${today}`, token),
       ouraFetch(`/v2/usercollection/daily_sleep?start_date=${yesterday}&end_date=${today}`, token),
@@ -1081,96 +1098,140 @@ app.get('/api/oura/today', async (req, res) => {
     const dailySleep    = dailySleepR.status === 'fulfilled' ? (dailySleepR.value.data || []).slice(-1)[0] : null
     const sleepSessions = sleepR.status      === 'fulfilled' ? (sleepR.value.data      || [])             : []
     const activity      = activityR.status   === 'fulfilled' ? (activityR.value.data   || []).slice(-1)[0] : null
-    console.log('[oura] today:', today, 'sessions count:', sleepSessions.length, sleepR.status === 'rejected' ? sleepR.reason?.message : '')
-    sleepSessions.forEach((s, i) => console.log(`[oura] session[${i}] type=${s.type} day=${s.day} bedtime_end=${s.bedtime_end?.slice(0,10)} total_sleep=${s.total_sleep_duration}`))
 
-    // Pick exactly one session for the selected date.
-    // Rules: day must match, ignore tiny partials (<300s), prefer long_sleep,
-    // break ties by largest total_sleep_duration.
     const pickMainSleepSession = (sessions, selectedDate) => {
       const forDay = sessions.filter(s => s.day === selectedDate && (s.total_sleep_duration || 0) >= 300)
-      console.log(`[oura] sessions for ${selectedDate}:`, forDay.map(s => `${s.type}/${s.total_sleep_duration}s`))
       if (!forDay.length) return null
       const long = forDay.filter(s => s.type === 'long_sleep')
       const pool = long.length ? long : forDay
-      const chosen = pool.reduce((best, s) => (s.total_sleep_duration || 0) > (best.total_sleep_duration || 0) ? s : best)
-      console.log(`[oura] chosen: id=${chosen.id} type=${chosen.type} day=${chosen.day} total_sleep=${chosen.total_sleep_duration}`)
-      return chosen
+      return pool.reduce((best, s) => (s.total_sleep_duration || 0) > (best.total_sleep_duration || 0) ? s : best)
     }
     const mainSleep = pickMainSleepSession(sleepSessions, today)
 
-    // Check if workout logged today
-    let workout_today = false, workout_log_id = null
-    if (supabase) {
-      const { data: gw } = await supabase.from('workout_logs').select('id').eq('date', today).limit(1)
-      workout_today = (gw || []).length > 0
-      workout_log_id = gw?.[0]?.id || null
-    }
-
     const fmtTime = (iso) => {
       if (!iso) return null
-      const d = new Date(iso)
-      return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })
+      return new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })
     }
 
-    res.json({
-      date: today,
-      workout_today,
-      workout_log_id,
-      readiness: readiness ? {
-        score:                 readiness.score,
-        temperature_deviation: readiness.temperature_deviation,
-        contributors:          readiness.contributors,
-      } : null,
-      sleep: (mainSleep || dailySleep) ? (() => {
-        const s = mainSleep
-        const payload = {
-          score:        dailySleep?.score        ?? null,
-          contributors: dailySleep?.contributors ?? null,
-          total_hours:  s ? secToHrs(s.total_sleep_duration)  : null,
-          deep_hours:   s ? secToHrs(s.deep_sleep_duration)   : null,
-          rem_hours:    s ? secToHrs(s.rem_sleep_duration)    : null,
-          light_hours:  s ? secToHrs(s.light_sleep_duration)  : null,
-          awake_hours:  s ? secToHrs(s.awake_time)            : null,
-          efficiency:   s?.efficiency                         ?? null,
-          latency_min:  s?.latency != null ? Math.round(s.latency / 60) : null,
-          resting_hr:   s?.lowest_heart_rate                  ?? null,
-          avg_hrv:      s?.average_hrv                        ?? null,
-          bedtime:      fmtTime(s?.bedtime_start),
-          wake_time:    fmtTime(s?.bedtime_end),
-        }
-        console.log('[oura] final sleep payload:', JSON.stringify(payload))
-        return payload
-      })() : null,
-      activity: activity ? {
-        score:            activity.score,
-        steps:            activity.steps,
-        active_calories:  activity.active_calories,
-        total_calories:   activity.total_calories,
-        target_calories:  activity.target_calories,
-        walking_miles:    activity.walking_equivalent_meters
-                            ? Math.round((activity.walking_equivalent_meters / 1609.34) * 10) / 10
-                            : null,
-        high_minutes:   activity.high    ?? null,
-        medium_minutes: activity.medium  ?? null,
-        low_minutes:    activity.low     ?? null,
-        non_wear:       activity.non_wear ?? null,
-      } : null,
-    })
+    const readinessPayload = readiness ? {
+      score: readiness.score, temperature_deviation: readiness.temperature_deviation, contributors: readiness.contributors,
+    } : null
+
+    const sleepPayload = (mainSleep || dailySleep) ? {
+      score:        dailySleep?.score        ?? null,
+      contributors: dailySleep?.contributors ?? null,
+      total_hours:  mainSleep ? secToHrs(mainSleep.total_sleep_duration)  : null,
+      deep_hours:   mainSleep ? secToHrs(mainSleep.deep_sleep_duration)   : null,
+      rem_hours:    mainSleep ? secToHrs(mainSleep.rem_sleep_duration)    : null,
+      light_hours:  mainSleep ? secToHrs(mainSleep.light_sleep_duration)  : null,
+      awake_hours:  mainSleep ? secToHrs(mainSleep.awake_time)            : null,
+      efficiency:   mainSleep?.efficiency                                 ?? null,
+      latency_min:  mainSleep?.latency != null ? Math.round(mainSleep.latency / 60) : null,
+      resting_hr:   mainSleep?.lowest_heart_rate                          ?? null,
+      avg_hrv:      mainSleep?.average_hrv                                ?? null,
+      bedtime:      fmtTime(mainSleep?.bedtime_start),
+      wake_time:    fmtTime(mainSleep?.bedtime_end),
+    } : null
+
+    const activityPayload = activity ? {
+      score: activity.score, steps: activity.steps,
+      active_calories: activity.active_calories, total_calories: activity.total_calories,
+      target_calories: activity.target_calories,
+      walking_miles: activity.walking_equivalent_meters ? Math.round((activity.walking_equivalent_meters / 1609.34) * 10) / 10 : null,
+      high_minutes: activity.high ?? null, medium_minutes: activity.medium ?? null,
+      low_minutes: activity.low   ?? null, non_wear:       activity.non_wear ?? null,
+    } : null
+
+    // ── 3. Save to Supabase ────────────────────────────────────────────────────
+    if (supabase) {
+      await supabase.from('oura_daily').upsert(
+        { date: today, readiness: readinessPayload, sleep: sleepPayload, activity: activityPayload, synced_at: new Date().toISOString() },
+        { onConflict: 'date' }
+      )
+    }
+
+    const workout = await getWorkout()
+    res.json({ date: today, ...workout, readiness: readinessPayload, sleep: sleepPayload, activity: activityPayload })
   } catch (err) {
     console.error('Oura today error:', err.message)
     res.status(500).json({ error: err.message })
   }
 })
 
-// ─── Verse of the Day ─────────────────────────────────────────────────────────
-app.get('/api/verse', async (req, res) => {
+// ─── Catholic Scripture (API.Bible) ──────────────────────────────────────────
+const CATHOLIC_PASSAGES = [
+  { ref: 'MAT.5.3-MAT.5.12',    label: 'Matthew 5:3-12'      },
+  { ref: 'JHN.3.16-JHN.3.17',  label: 'John 3:16-17'        },
+  { ref: 'PSA.23.1-PSA.23.6',   label: 'Psalm 23:1-6'        },
+  { ref: 'ROM.8.28',             label: 'Romans 8:28'          },
+  { ref: 'PHP.4.4-PHP.4.7',     label: 'Philippians 4:4-7'   },
+  { ref: 'JHN.14.6',            label: 'John 14:6'            },
+  { ref: 'JHN.15.9-JHN.15.13', label: 'John 15:9-13'         },
+  { ref: 'ISA.40.28-ISA.40.31', label: 'Isaiah 40:28-31'     },
+  { ref: 'MAT.6.25-MAT.6.34',  label: 'Matthew 6:25-34'     },
+  { ref: '1CO.13.4-1CO.13.7',  label: '1 Corinthians 13:4-7'},
+  { ref: 'ROM.8.38-ROM.8.39',  label: 'Romans 8:38-39'       },
+  { ref: 'EPH.3.20-EPH.3.21',  label: 'Ephesians 3:20-21'   },
+  { ref: 'JAS.1.2-JAS.1.4',    label: 'James 1:2-4'          },
+  { ref: 'PSA.91.1-PSA.91.4',  label: 'Psalm 91:1-4'         },
+  { ref: 'JER.29.11',           label: 'Jeremiah 29:11'       },
+  { ref: 'PRO.3.5-PRO.3.6',    label: 'Proverbs 3:5-6'       },
+  { ref: 'MIC.6.8',             label: 'Micah 6:8'            },
+  { ref: 'ISA.43.1-ISA.43.3',  label: 'Isaiah 43:1-3'        },
+  { ref: 'DEU.31.6',            label: 'Deuteronomy 31:6'     },
+  { ref: 'MAT.28.19-MAT.28.20',label: 'Matthew 28:19-20'     },
+  { ref: 'JHN.1.1-JHN.1.5',    label: 'John 1:1-5'           },
+  { ref: 'MAT.22.37-MAT.22.39',label: 'Matthew 22:37-39'     },
+  { ref: 'LUK.1.46-LUK.1.49',  label: 'Luke 1:46-49'         },
+  { ref: 'LUK.6.27-LUK.6.28',  label: 'Luke 6:27-28'         },
+  { ref: 'MAT.11.28-MAT.11.30',label: 'Matthew 11:28-30'     },
+  { ref: 'PHP.2.3-PHP.2.5',    label: 'Philippians 2:3-5'    },
+  { ref: 'GAL.5.22-GAL.5.23',  label: 'Galatians 5:22-23'   },
+  { ref: 'ROM.12.1-ROM.12.2',  label: 'Romans 12:1-2'        },
+  { ref: 'HEB.11.1',            label: 'Hebrews 11:1'         },
+  { ref: 'JHN.10.14-JHN.10.15',label: 'John 10:14-15'        },
+  { ref: 'JHN.8.31-JHN.8.32',  label: 'John 8:31-32'         },
+  { ref: 'MAT.5.14-MAT.5.16',  label: 'Matthew 5:14-16'      },
+  { ref: 'PSA.46.1-PSA.46.3',  label: 'Psalm 46:1-3'         },
+  { ref: 'ISA.55.8-ISA.55.9',  label: 'Isaiah 55:8-9'        },
+  { ref: 'JHN.6.35',            label: 'John 6:35'            },
+  { ref: 'REV.21.3-REV.21.4',  label: 'Revelation 21:3-4'   },
+  { ref: 'PHP.4.13',            label: 'Philippians 4:13'     },
+  { ref: '1JO.4.7-1JO.4.8',   label: '1 John 4:7-8'         },
+  { ref: 'LUK.11.9-LUK.11.10', label: 'Luke 11:9-10'         },
+  { ref: 'PSA.139.1-PSA.139.4',label: 'Psalm 139:1-4'        },
+  { ref: 'MAT.6.9-MAT.6.13',   label: 'Matthew 6:9-13'       },
+  { ref: 'JHN.11.25-JHN.11.26',label: 'John 11:25-26'        },
+  { ref: 'ROM.5.8',             label: 'Romans 5:8'           },
+  { ref: 'EPH.2.8-EPH.2.9',    label: 'Ephesians 2:8-9'      },
+  { ref: '1PE.5.7',             label: '1 Peter 5:7'          },
+  { ref: 'MAT.18.20',           label: 'Matthew 18:20'        },
+  { ref: 'JHN.14.27',           label: 'John 14:27'           },
+  { ref: 'ISA.9.6',             label: 'Isaiah 9:6'           },
+  { ref: 'LUK.2.10-LUK.2.11',  label: 'Luke 2:10-11'         },
+  { ref: 'REV.3.20',            label: 'Revelation 3:20'      },
+  { ref: 'PSA.119.105',         label: 'Psalm 119:105'        },
+  { ref: '2TI.3.16-2TI.3.17',  label: '2 Timothy 3:16-17'   },
+]
+function getCatholicPassage(dateStr) {
+  const [y, m, d] = dateStr.split('-').map(Number)
+  const dayOfYear = Math.floor((new Date(y, m - 1, d) - new Date(y, 0, 0)) / 86400000)
+  return CATHOLIC_PASSAGES[Math.floor((dayOfYear - 1) / 7) % CATHOLIC_PASSAGES.length]
+}
+app.get('/api/catholic', async (req, res) => {
+  const apiKey  = process.env.BIBLE_API_KEY
+  const bibleId = process.env.BIBLE_ID || 'de4e12af7f28f599-02'
+  if (!apiKey || apiKey === 'your_key_here') return res.status(503).json({ error: 'BIBLE_API_KEY not configured' })
   try {
-    const r    = await fetch('https://labs.bible.org/api/?passage=votd&type=json&formatting=plain')
+    const dateStr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' })
+    const passage = getCatholicPassage(dateStr)
+    const url = `https://rest.api.bible/v1/bibles/${bibleId}/passages/${passage.ref}` +
+      `?content-type=text&include-notes=false&include-titles=false&include-chapter-numbers=false&include-verse-numbers=false&include-verse-spans=false`
+    const r = await fetch(url, { headers: { 'api-key': apiKey }, signal: AbortSignal.timeout(8000) })
+    if (!r.ok) throw new Error(`API.Bible ${r.status}`)
     const json = await r.json()
-    const v    = Array.isArray(json) ? json[0] : null
-    if (!v) return res.status(404).json({ error: 'No verse' })
-    res.json({ text: v.text, reference: `${v.bookname} ${v.chapter}:${v.verse}` })
+    const text = (json?.data?.content || '').trim()
+    res.json({ dayTitle: passage.label, saint: '', firstReading: null, psalm: null, gospel: { source: null, excerpt: text } })
   } catch (e) { res.status(500).json({ error: e.message }) }
 })
 
