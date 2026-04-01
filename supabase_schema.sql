@@ -130,3 +130,26 @@ alter table events             disable row level security;
 alter table bank_accounts add column if not exists source           text not null default 'teller';
 alter table bank_accounts add column if not exists snap_account_id  text;
 alter table bank_transactions add column if not exists note          text;
+
+
+-- ── 7. Sleep records (Oura cache) ─────────────────────────────────────────────
+
+create table if not exists sleep_records (
+  date         date primary key,
+  score        integer,
+  contributors jsonb,
+  total_hours  numeric,
+  deep_hours   numeric,
+  rem_hours    numeric,
+  light_hours  numeric,
+  awake_hours  numeric,
+  efficiency   integer,
+  latency_min  integer,
+  resting_hr   integer,
+  avg_hrv      numeric,
+  bedtime      text,
+  wake_time    text,
+  synced_at    timestamptz default now()
+);
+
+alter table sleep_records disable row level security;

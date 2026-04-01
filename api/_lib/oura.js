@@ -15,4 +15,5 @@ export async function ouraFetch(path, token) {
   return res.json()
 }
 
-export const secToHrs = (s) => Math.round((s || 0) / 360) / 10
+// Round to nearest minute, then return fractional hours so fmtHrs() displays exact h/m
+export const secToHrs = (s) => Math.round((s || 0) / 60) / 60

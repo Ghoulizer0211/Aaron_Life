@@ -1027,7 +1027,8 @@ async function ouraFetch(path, token) {
   return res.json()
 }
 
-const secToHrs = (s) => Math.round((s || 0) / 360) / 10
+// Round to nearest minute, then return fractional hours so fmtHrs() displays exact h/m
+const secToHrs = (s) => Math.round((s || 0) / 60) / 60
 
 app.post('/api/oura/connect', async (req, res) => {
   const { token } = req.body
@@ -1063,30 +1064,47 @@ app.get('/api/oura/today', async (req, res) => {
   const token = await getOuraToken()
   if (!token) return res.status(404).json({ error: 'Not connected' })
 
-  const today     = req.query.date || new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' })
-  const yesterday = new Date(new Date(today + 'T12:00:00').getTime() - 86400000).toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' })
+  const today      = req.query.date || new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' })
+  const yesterday  = new Date(new Date(today + 'T12:00:00').getTime() - 86400000).toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' })
+  const twoDaysAgo = new Date(new Date(today + 'T12:00:00').getTime() - 2 * 86400000).toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' })
+  const tomorrow   = new Date(new Date(today + 'T12:00:00').getTime() + 86400000).toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' })
 
   try {
     const [readinessR, dailySleepR, sleepR, activityR] = await Promise.allSettled([
       ouraFetch(`/v2/usercollection/daily_readiness?start_date=${yesterday}&end_date=${today}`, token),
       ouraFetch(`/v2/usercollection/daily_sleep?start_date=${yesterday}&end_date=${today}`, token),
-      ouraFetch(`/v2/usercollection/sleep?start_date=${yesterday}&end_date=${today}`, token),
+      ouraFetch(`/v2/usercollection/sleep?start_date=${twoDaysAgo}&end_date=${tomorrow}`, token),
       ouraFetch(`/v2/usercollection/daily_activity?start_date=${today}&end_date=${today}`, token),
     ])
 
-    const readiness     = readinessR.status  === 'fulfilled' ? readinessR.value.data?.slice(-1)[0]  : null
-    const dailySleep    = dailySleepR.status === 'fulfilled' ? dailySleepR.value.data?.slice(-1)[0] : null
-    const sleepSessions = sleepR.status      === 'fulfilled' ? sleepR.value.data : []
-    const activity      = activityR.status   === 'fulfilled' ? activityR.value.data?.slice(-1)[0]   : null
+    const readiness     = readinessR.status  === 'fulfilled' ? (readinessR.value.data  || []).slice(-1)[0] : null
+    const dailySleep    = dailySleepR.status === 'fulfilled' ? (dailySleepR.value.data || []).slice(-1)[0] : null
+    const sleepSessions = sleepR.status      === 'fulfilled' ? (sleepR.value.data      || [])             : []
+    const activity      = activityR.status   === 'fulfilled' ? (activityR.value.data   || []).slice(-1)[0] : null
+    console.log('[oura] today:', today, 'sessions count:', sleepSessions.length, sleepR.status === 'rejected' ? sleepR.reason?.message : '')
+    sleepSessions.forEach((s, i) => console.log(`[oura] session[${i}] type=${s.type} day=${s.day} bedtime_end=${s.bedtime_end?.slice(0,10)} total_sleep=${s.total_sleep_duration}`))
 
-    const mainSleep = sleepSessions.find(s => s.type === 'long_sleep')
-      || sleepSessions[sleepSessions.length - 1] || null
+    // Pick exactly one session for the selected date.
+    // Rules: day must match, ignore tiny partials (<300s), prefer long_sleep,
+    // break ties by largest total_sleep_duration.
+    const pickMainSleepSession = (sessions, selectedDate) => {
+      const forDay = sessions.filter(s => s.day === selectedDate && (s.total_sleep_duration || 0) >= 300)
+      console.log(`[oura] sessions for ${selectedDate}:`, forDay.map(s => `${s.type}/${s.total_sleep_duration}s`))
+      if (!forDay.length) return null
+      const long = forDay.filter(s => s.type === 'long_sleep')
+      const pool = long.length ? long : forDay
+      const chosen = pool.reduce((best, s) => (s.total_sleep_duration || 0) > (best.total_sleep_duration || 0) ? s : best)
+      console.log(`[oura] chosen: id=${chosen.id} type=${chosen.type} day=${chosen.day} total_sleep=${chosen.total_sleep_duration}`)
+      return chosen
+    }
+    const mainSleep = pickMainSleepSession(sleepSessions, today)
 
-    // Check if workout logged today (new workout_logs table)
-    let workout_today = false
+    // Check if workout logged today
+    let workout_today = false, workout_log_id = null
     if (supabase) {
       const { data: gw } = await supabase.from('workout_logs').select('id').eq('date', today).limit(1)
       workout_today = (gw || []).length > 0
+      workout_log_id = gw?.[0]?.id || null
     }
 
     const fmtTime = (iso) => {
@@ -1098,25 +1116,32 @@ app.get('/api/oura/today', async (req, res) => {
     res.json({
       date: today,
       workout_today,
+      workout_log_id,
       readiness: readiness ? {
         score:                 readiness.score,
         temperature_deviation: readiness.temperature_deviation,
         contributors:          readiness.contributors,
       } : null,
-      sleep: mainSleep || dailySleep ? {
-        score:       dailySleep?.score       ?? null,
-        contributors: dailySleep?.contributors ?? null,
-        total_hours: mainSleep ? secToHrs(mainSleep.total_sleep_duration)  : null,
-        deep_hours:  mainSleep ? secToHrs(mainSleep.deep_sleep_duration)   : null,
-        rem_hours:   mainSleep ? secToHrs(mainSleep.rem_sleep_duration)    : null,
-        light_hours: mainSleep ? secToHrs(mainSleep.light_sleep_duration)  : null,
-        awake_hours: mainSleep ? secToHrs(mainSleep.awake_time ?? 0)       : null,
-        efficiency:  mainSleep?.efficiency        ?? null,
-        resting_hr:  mainSleep?.lowest_heart_rate ?? null,
-        avg_hrv:     mainSleep?.average_hrv       ?? null,
-        bedtime:     fmtTime(mainSleep?.bedtime_start),
-        wake_time:   fmtTime(mainSleep?.bedtime_end),
-      } : null,
+      sleep: (mainSleep || dailySleep) ? (() => {
+        const s = mainSleep
+        const payload = {
+          score:        dailySleep?.score        ?? null,
+          contributors: dailySleep?.contributors ?? null,
+          total_hours:  s ? secToHrs(s.total_sleep_duration)  : null,
+          deep_hours:   s ? secToHrs(s.deep_sleep_duration)   : null,
+          rem_hours:    s ? secToHrs(s.rem_sleep_duration)    : null,
+          light_hours:  s ? secToHrs(s.light_sleep_duration)  : null,
+          awake_hours:  s ? secToHrs(s.awake_time)            : null,
+          efficiency:   s?.efficiency                         ?? null,
+          latency_min:  s?.latency != null ? Math.round(s.latency / 60) : null,
+          resting_hr:   s?.lowest_heart_rate                  ?? null,
+          avg_hrv:      s?.average_hrv                        ?? null,
+          bedtime:      fmtTime(s?.bedtime_start),
+          wake_time:    fmtTime(s?.bedtime_end),
+        }
+        console.log('[oura] final sleep payload:', JSON.stringify(payload))
+        return payload
+      })() : null,
       activity: activity ? {
         score:            activity.score,
         steps:            activity.steps,
@@ -1136,6 +1161,17 @@ app.get('/api/oura/today', async (req, res) => {
     console.error('Oura today error:', err.message)
     res.status(500).json({ error: err.message })
   }
+})
+
+// ─── Verse of the Day ─────────────────────────────────────────────────────────
+app.get('/api/verse', async (req, res) => {
+  try {
+    const r    = await fetch('https://labs.bible.org/api/?passage=votd&type=json&formatting=plain')
+    const json = await r.json()
+    const v    = Array.isArray(json) ? json[0] : null
+    if (!v) return res.status(404).json({ error: 'No verse' })
+    res.json({ text: v.text, reference: `${v.bookname} ${v.chapter}:${v.verse}` })
+  } catch (e) { res.status(500).json({ error: e.message }) }
 })
 
 // 7-30 day history for trends/sleep charts

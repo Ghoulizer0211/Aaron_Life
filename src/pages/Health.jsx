@@ -273,17 +273,78 @@ function DateNav({ date, setDate, onSync, syncing }) {
 
 // â”€â”€ TODAY TAB â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-function TodayTab({ oura, logs, date, setDate }) {
-  const { data, loading, error, refetch } = oura
-  const { readiness, sleep, activity, workout_today } = data || {}
+function VerseCard() {
+  const cacheKey = `verse_${todayStr()}`
+  const [verse, setVerse] = useState(() => {
+    try { return JSON.parse(localStorage.getItem(cacheKey) || 'null') } catch { return null }
+  })
+  useEffect(() => {
+    if (verse) return
+    fetch('/api/verse').then(r => r.json()).then(j => {
+      if (j.text) { setVerse(j); localStorage.setItem(cacheKey, JSON.stringify(j)) }
+    }).catch(() => {})
+  }, []) // eslint-disable-line
+  if (!verse) return null
+  return (
+    <section className="page-section">
+      <div className="card verse-card">
+        <div className="verse-label">✝ Verse of the Day</div>
+        <div className="verse-text">"{verse.text}"</div>
+        <div className="verse-ref">— {verse.reference}</div>
+      </div>
+    </section>
+  )
+}
+
+function TodayTab({ oura, logs, date, onOpenGym }) {
+  const { data, loading, error } = oura
+  const { readiness, sleep, activity } = data || {}
   const streak = calcStreakFromLogs(logs)
   const rColor = scoreColor(readiness?.score)
 
+  const [workoutDone,  setWorkoutDone]  = useState(!!data?.workout_today)
+  const [workoutLogId, setWorkoutLogId] = useState(data?.workout_log_id || null)
+  const [wkLoading,    setWkLoading]    = useState(false)
+
+  useEffect(() => {
+    setWorkoutDone(!!data?.workout_today)
+    setWorkoutLogId(data?.workout_log_id || null)
+  }, [data])
+
+  const toggleWorkout = async () => {
+    if (wkLoading) return
+    const newDone = !workoutDone
+    setWorkoutDone(newDone)
+    setWkLoading(true)
+    try {
+      if (newDone) {
+        const res  = await fetch('/api/gym/logs', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ date, day_name: 'Workout Done', notes: '' }),
+        })
+        const json = await res.json()
+        if (json.id) setWorkoutLogId(json.id)
+      } else if (workoutLogId) {
+        await fetch(`/api/gym/logs/${workoutLogId}`, { method: 'DELETE' })
+        setWorkoutLogId(null)
+      }
+    } catch { setWorkoutDone(!newDone) }
+    finally { setWkLoading(false) }
+  }
+
+  const parts = []
+  if (sleep?.total_hours != null)       parts.push(`Slept ${fmtHrs(sleep.total_hours)}`)
+  if (sleep?.avg_hrv != null)           parts.push(`HRV ${Math.round(sleep.avg_hrv)} ms`)
+  if (sleep?.resting_hr != null)        parts.push(`HR ${sleep.resting_hr} bpm`)
+  if (activity?.steps != null)          parts.push(`${activity.steps.toLocaleString()} steps`)
+  if (activity?.total_calories != null) parts.push(`${activity.total_calories} kcal`)
+  parts.push(workoutDone ? 'Workout ✓' : 'Workout not logged')
+
   return (
     <div className="health-scroll">
-      <DateNav date={date} setDate={setDate} onSync={refetch} syncing={loading} />
-
       {error && <div className="health-error" style={{margin:'12px 16px'}}>{error}</div>}
+
+      {data && <div className="today-summary">{parts.join(' • ')}</div>}
 
       {/* Readiness hero */}
       <section className="page-section">
@@ -314,16 +375,17 @@ function TodayTab({ oura, logs, date, setDate }) {
       <section className="page-section">
         <div className="card gym-today-card">
           <div className="gtc-left">
-            <span className="gtc-title">Gym Today</span>
+            <label className="gtc-check-label">
+              <input type="checkbox" className="gtc-checkbox" checked={workoutDone} onChange={toggleWorkout} disabled={wkLoading} />
+              <span className="gtc-title">Workout Done</span>
+            </label>
             <span className="gtc-streak">{streak > 0 ? `🔥 ${streak} day streak` : 'No streak yet'}</span>
           </div>
-          <div className="gtc-right">
-            <span className={`gtc-status ${workout_today ? 'done' : 'pending'}`}>
-              {workout_today ? '✓ Done' : '— Not logged'}
-            </span>
-          </div>
+          <button className="gtc-log-btn" onClick={onOpenGym}>Log Workout →</button>
         </div>
       </section>
+
+      <VerseCard />
 
       {!loading && !data && (
         <div className="health-empty" style={{margin:'0 16px'}}>No data for this day. Try a different date.</div>
@@ -344,117 +406,184 @@ function MetricTile({ label, value, sub, color }) {
 
 // â”€â”€ SLEEP TAB â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-function SleepTab({ oura, weekData, date, setDate }) {
-  const { data, loading, refetch } = oura
-  const sleep = data?.sleep
+function sleepScoreColor(s) {
+  if (s == null) return 'var(--text-muted)'
+  if (s >= 85) return '#1ed760'   // Oura green  (Great)
+  if (s >= 70) return '#4ade80'   // soft green  (Good)
+  if (s >= 60) return '#facc15'   // yellow      (Fair)
+  return '#f87171'                // soft red    (Poor)
+}
 
-  // 7-day trend from weekData
-  const last7 = (weekData || []).slice(-7)
-  const chartItems = last7.map(d => ({
-    label: new Date(d.date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'narrow' }),
-    value: d.sleep_score,
-    color: scoreColor(d.sleep_score),
-  }))
+function SleepTab({ oura, weekData, date }) {
+  const { data, loading } = oura
+  const sleep        = data?.sleep
+  const contributors = sleep?.contributors || {}
 
-  const avgHours = last7.filter(d => d.sleep_hours).reduce((s, d, _, a) => s + d.sleep_hours / a.length, 0)
-  const sleepDebt = Math.max(0, 8 - avgHours)
+  const scoreLabel = (s) => {
+    if (s == null) return null
+    if (s >= 85) return 'Great'
+    if (s >= 70) return 'Good'
+    if (s >= 60) return 'Fair'
+    return 'Poor'
+  }
 
-  const sleepTotal = (sleep?.deep_hours || 0) + (sleep?.rem_hours || 0) + (sleep?.light_hours || 0)
+  const contribLabel = (val) => {
+    if (val == null) return '—'
+    if (val >= 85) return 'Optimal'
+    if (val >= 70) return 'Good'
+    if (val >= 50) return 'Fair'
+    return 'Poor'
+  }
+
+  const latencyLabel = (min) => min != null ? `${min} min` : '—'
+
+  // Uses Oura's timing contributor (circadian alignment score)
+  const timingStatus = (timingScore) => {
+    if (timingScore == null) return null
+    if (timingScore >= 80) return 'On schedule'
+    if (timingScore >= 60) return 'Slightly off'
+    return 'Late sleep'
+  }
+
+  const dateLabel = (d) => {
+    const today = todayStr()
+    const yesterday = offsetDate(today, -1)
+    if (d === today)     return 'Last Night'
+    if (d === yesterday) return '2 Nights Ago'
+    return new Date(d + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+  }
+
+  const sleepTotal = (sleep?.rem_hours || 0) + (sleep?.deep_hours || 0) + (sleep?.light_hours || 0) + (sleep?.awake_hours || 0)
+  const sc = sleep?.score
 
   return (
     <div className="health-scroll">
-      <DateNav date={date} setDate={setDate} onSync={refetch} syncing={loading} />
-
-      {/* Sleep card */}
       <section className="page-section">
-        <div className="card detail-card">
-          <div className="detail-row">
-            <span className="detail-label">Total Sleep</span>
-            <span className="detail-value" style={{ color: scoreColor(sleep?.score) }}>{fmtHrs(sleep?.total_hours)}</span>
-          </div>
-          {(sleep?.bedtime || sleep?.wake_time) && (
-            <div className="detail-row">
-              <span className="detail-label">Bedtime → Wake</span>
-              <span className="detail-value">{sleep?.bedtime ?? '—'} → {sleep?.wake_time ?? '—'}</span>
-            </div>
-          )}
-          <div className="detail-row">
-            <span className="detail-label">Sleep Score</span>
-            <span className="detail-value" style={{ color: scoreColor(sleep?.score) }}>{sleep?.score ?? '—'}</span>
-          </div>
-          {sleep?.efficiency != null && (
-            <div className="detail-row">
-              <span className="detail-label">Efficiency</span>
-              <span className="detail-value">{sleep.efficiency}%</span>
-            </div>
-          )}
-          {sleep?.avg_hrv != null && (
-            <div className="detail-row">
-              <span className="detail-label">Avg HRV</span>
-              <span className="detail-value">{Math.round(sleep.avg_hrv)} ms</span>
-            </div>
-          )}
-          {sleep?.resting_hr != null && (
-            <div className="detail-row">
-              <span className="detail-label">Lowest HR</span>
-              <span className="detail-value">{sleep.resting_hr} bpm</span>
-            </div>
-          )}
+        <div className="slp-card">
 
+          {/* Eyebrow */}
+          <div className="slp-eyebrow">{dateLabel(date)}</div>
+
+          {/* Score hero */}
+          <div className="slp-hero">
+            <div className="slp-hero-left">
+              <div className="slp-hero-title">Sleep Score</div>
+              {sc != null && <div className="slp-hero-label" style={{ color: sleepScoreColor(sc) }}>{scoreLabel(sc)}</div>}
+            </div>
+            <div className="slp-hero-score" style={{ color: sleepScoreColor(sc) }}>
+              {sc ?? '—'}
+            </div>
+          </div>
+
+          <div className="slp-divider" />
+
+          {/* Primary row: total sleep + bedtime */}
+          <div className="slp-primary">
+            <div className="slp-primary-left">
+              <div className="slp-total-row">
+                <span className="slp-moon">🌙</span>
+                <span className="slp-total-val">{fmtHrs(sleep?.total_hours)}</span>
+              </div>
+              <div className="slp-sub-label">Total Sleep</div>
+            </div>
+            <div className="slp-vline" />
+            <div className="slp-primary-right">
+              <div className="slp-bedtime-str">{sleep?.bedtime ?? '—'} → {sleep?.wake_time ?? '—'}</div>
+              {contributors.timing != null && (
+                <div className="slp-sched-tag">⏱ {timingStatus(contributors.timing)}</div>
+              )}
+            </div>
+          </div>
+
+          <div className="slp-divider" />
+
+          {/* Secondary metrics */}
+          <div className="slp-metrics">
+            <div className="slp-met">
+              <span className="slp-met-icon">🎯</span>
+              <span className="slp-met-val">{sleep?.efficiency != null ? `${sleep.efficiency}%` : '—'}</span>
+              <span className="slp-met-name">Efficiency</span>
+            </div>
+            <div className="slp-met">
+              <span className="slp-met-icon">⏱</span>
+              <span className="slp-met-val">{latencyLabel(sleep?.latency_min)}</span>
+              <span className="slp-met-name">Latency</span>
+            </div>
+            <div className="slp-met">
+              <span className="slp-met-icon">✨</span>
+              <span className="slp-met-val">{contribLabel(contributors.restfulness)}</span>
+              <span className="slp-met-name">Restfulness</span>
+            </div>
+          </div>
+
+          {/* Sleep stages */}
           {sleepTotal > 0 && (
-            <div className="sleep-breakdown">
-              <div className="sleep-bar">
-                {sleep.deep_hours  > 0 && <div className="sleep-seg deep"  style={{ flex: sleep.deep_hours }} />}
-                {sleep.rem_hours   > 0 && <div className="sleep-seg rem"   style={{ flex: sleep.rem_hours }} />}
-                {sleep.light_hours > 0 && <div className="sleep-seg light" style={{ flex: sleep.light_hours }} />}
-                {sleep.awake_hours > 0 && <div className="sleep-seg awake" style={{ flex: sleep.awake_hours }} />}
+            <>
+              <div className="slp-divider" />
+              <div className="slp-stages">
+                <div className="slp-stage-bar">
+                  {sleep.deep_hours  > 0 && <div className="slp-seg slp-seg--deep"  style={{ flex: sleep.deep_hours  }} />}
+                  {sleep.light_hours > 0 && <div className="slp-seg slp-seg--light" style={{ flex: sleep.light_hours }} />}
+                  {sleep.rem_hours   > 0 && <div className="slp-seg slp-seg--rem"   style={{ flex: sleep.rem_hours   }} />}
+                  {sleep.awake_hours > 0 && <div className="slp-seg slp-seg--awake" style={{ flex: sleep.awake_hours }} />}
+                </div>
+                <div className="slp-stage-list">
+                  <div className="slp-stage-item">
+                    <span className="slp-dot slp-dot--deep" />
+                    <span className="slp-stage-lbl">Deep</span>
+                    <span className="slp-stage-time">{fmtHrs(sleep.deep_hours)}</span>
+                  </div>
+                  <div className="slp-stage-item">
+                    <span className="slp-dot slp-dot--light" />
+                    <span className="slp-stage-lbl">Light</span>
+                    <span className="slp-stage-time">{fmtHrs(sleep.light_hours)}</span>
+                  </div>
+                  <div className="slp-stage-item">
+                    <span className="slp-dot slp-dot--rem" />
+                    <span className="slp-stage-lbl">REM</span>
+                    <span className="slp-stage-time">{fmtHrs(sleep.rem_hours)}</span>
+                  </div>
+                  {sleep.awake_hours > 0 && (
+                    <div className="slp-stage-item">
+                      <span className="slp-dot slp-dot--awake" />
+                      <span className="slp-stage-lbl">Awake</span>
+                      <span className="slp-stage-time">{fmtHrs(sleep.awake_hours)}</span>
+                    </div>
+                  )}
+                </div>
               </div>
-              <div className="sleep-legend">
-                <span className="legend-item"><span className="legend-dot deep-dot" />Deep {fmtHrs(sleep.deep_hours)}</span>
-                <span className="legend-item"><span className="legend-dot rem-dot" />REM {fmtHrs(sleep.rem_hours)}</span>
-                <span className="legend-item"><span className="legend-dot light-dot" />Light {fmtHrs(sleep.light_hours)}</span>
-                {sleep.awake_hours > 0 && <span className="legend-item"><span className="legend-dot awake-dot" />Awake {fmtHrs(sleep.awake_hours)}</span>}
-              </div>
-            </div>
+            </>
           )}
+
+          {/* Recovery signals */}
+          {(sleep?.resting_hr != null || sleep?.avg_hrv != null) && (
+            <>
+              <div className="slp-divider" />
+              <div className="slp-recovery">
+                {sleep.resting_hr != null && (
+                  <div className="slp-rec">
+                    <span className="slp-rec-icon">🫀</span>
+                    <div className="slp-rec-info">
+                      <span className="slp-rec-val">{sleep.resting_hr}<span className="slp-rec-unit"> bpm</span></span>
+                      <span className="slp-rec-lbl">Lowest HR</span>
+                    </div>
+                  </div>
+                )}
+                {sleep.avg_hrv != null && (
+                  <div className="slp-rec">
+                    <span className="slp-rec-icon">〰️</span>
+                    <div className="slp-rec-info">
+                      <span className="slp-rec-val">{Math.round(sleep.avg_hrv)}<span className="slp-rec-unit"> ms</span></span>
+                      <span className="slp-rec-lbl">Avg HRV</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+
         </div>
       </section>
-
-      {/* Insight */}
-      <section className="page-section">
-        <div className="card insight-card">
-          <span className="insight-icon">💤</span>
-          <span className="insight-text">{sleepInsight(sleep?.total_hours, sleep?.score)}</span>
-        </div>
-      </section>
-
-      {/* 7-day chart */}
-      {chartItems.length > 0 && (
-        <section className="page-section">
-          <h2 className="section-title">7-Day Sleep Score</h2>
-          <div className="card" style={{ padding: '16px' }}>
-            <BarChart items={chartItems} height={60} />
-          </div>
-        </section>
-      )}
-
-      {/* Weekly stats */}
-      {last7.length > 0 && (
-        <section className="page-section">
-          <div className="card detail-card">
-            <div className="detail-row">
-              <span className="detail-label">Weekly Avg</span>
-              <span className="detail-value">{fmtHrs(avgHours || null)}</span>
-            </div>
-            <div className="detail-row">
-              <span className="detail-label">Sleep Debt</span>
-              <span className="detail-value" style={{ color: sleepDebt > 1 ? '#ff3864' : 'var(--text-primary)' }}>
-                {sleepDebt > 0.1 ? `${fmtHrs(sleepDebt)} behind` : 'On track'}
-              </span>
-            </div>
-          </div>
-        </section>
-      )}
     </div>
   )
 }
@@ -1350,15 +1479,14 @@ function GymTab() {
 
 // â”€â”€ ACTIVITY TAB â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-function ActivityTab({ oura, date, setDate }) {
-  const { data, loading, refetch } = oura
+function ActivityTab({ oura, date }) {
+  const { data } = oura
   const activity = data?.activity
   const stepsGoal = 10000
   const stepsPct  = activity?.steps ? Math.min(100, Math.round((activity.steps / stepsGoal) * 100)) : 0
 
   return (
     <div className="health-scroll">
-      <DateNav date={date} setDate={setDate} onSync={refetch} syncing={loading} />
 
       <section className="page-section">
         <div className="card detail-card">
@@ -1611,16 +1739,22 @@ export default function Health() {
 
   if (!linked) return <ConnectScreen onConnect={handleConnect} loading={connectLoading} error={connectError} />
 
+  const showDateNav = tab === 'today' || tab === 'sleep' || tab === 'activity'
+
   return (
     <div className="page health-page">
       <div className="health-topbar">
         <HealthTabs tab={tab} setTab={setTab} />
       </div>
 
-      {tab === 'today'    && <TodayTab    oura={oura}    logs={logsHook.logs} date={date} setDate={setDate} />}
-      {tab === 'sleep'    && <SleepTab    oura={oura}    weekData={weekData} date={date} setDate={setDate} />}
+      {showDateNav && (
+        <DateNav date={date} setDate={setDate} onSync={oura.refetch} syncing={oura.loading} />
+      )}
+
+      {tab === 'today'    && <TodayTab    oura={oura}    logs={logsHook.logs} date={date} onOpenGym={() => setTab('gym')} />}
+      {tab === 'sleep'    && <SleepTab    oura={oura}    weekData={weekData}  date={date} />}
       {tab === 'gym'      && <GymTab />}
-      {tab === 'activity' && <ActivityTab oura={oura}    date={date} setDate={setDate} />}
+      {tab === 'activity' && <ActivityTab oura={oura}    date={date} />}
       {tab === 'trends'   && <TrendsTab   weekData={weekData} logs={logsHook.logs} />}
     </div>
   )
