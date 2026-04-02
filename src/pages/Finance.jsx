@@ -6,15 +6,16 @@ import './Finance.css'
 // ── Constants ──────────────────────────────────────────────────────────────────
 
 const CATEGORIES = [
-  { id: 'food',      label: 'Food',          icon: '🍔', color: '#f0a500' },
-  { id: 'care',      label: 'Personal Care', icon: '💆', color: '#e05c5c' },
-  { id: 'bills',     label: 'Bills',         icon: '🏠', color: '#4a90d9' },
-  { id: 'transport', label: 'Transport',     icon: '🚗', color: '#ff2d78' },
-  { id: 'shopping',  label: 'Shopping',      icon: '🛍️', color: '#4ab8d4' },
-  { id: 'investing', label: 'Investing',     icon: '📈', color: '#00ff9d' },
-  { id: 'income',    label: 'Income',        icon: '💰', color: '#00e5ff' },
-  { id: 'other',     label: 'Other',         icon: '💸', color: '#888888' },
-  { id: 'transfer',  label: 'Transfer',      icon: '🔄', color: '#555555' },
+  { id: 'food',          label: 'Food',           icon: '🍔', color: '#f0a500' },
+  { id: 'care',          label: 'Personal Care',  icon: '💆', color: '#e05c5c' },
+  { id: 'bills',         label: 'Bills',          icon: '🏠', color: '#4a90d9' },
+  { id: 'transport',     label: 'Transport',      icon: '🚗', color: '#ff2d78' },
+  { id: 'shopping',      label: 'Shopping',       icon: '🛍️', color: '#4ab8d4' },
+  { id: 'entertainment', label: 'Entertainment',  icon: '🎬', color: '#a855f7' },
+  { id: 'investing',     label: 'Investing',      icon: '📈', color: '#00ff9d' },
+  { id: 'income',        label: 'Income',         icon: '💰', color: '#00e5ff' },
+  { id: 'other',         label: 'Other',          icon: '💸', color: '#888888' },
+  { id: 'transfer',      label: 'Transfer',       icon: '🔄', color: '#555555' },
 ]
 const CATEGORY_MAP    = Object.fromEntries(CATEGORIES.map(c => [c.id, c]))
 const CATEGORY_COLORS = Object.fromEntries(CATEGORIES.map(c => [c.id, c.color]))
@@ -43,6 +44,49 @@ function monthLabel(m) {
 
 function currentMonth() {
   return new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' }).slice(0, 7)
+}
+
+function prevMonthStr(m) {
+  const [y, mo] = m.split('-').map(Number)
+  return mo === 1
+    ? `${y - 1}-12`
+    : `${y}-${String(mo - 1).padStart(2, '0')}`
+}
+
+// ── Spending classification ───────────────────────────────────────────────────
+
+const REAL_SPEND_CATS = new Set(['food', 'care', 'bills', 'transport', 'shopping', 'entertainment', 'other'])
+
+function isRealSpend(tx) {
+  if (parseFloat(tx.amount) >= 0) return false   // income / refund / credit
+  if (tx.is_transfer) return false
+  return REAL_SPEND_CATS.has(tx.category)
+}
+
+function isExcluded(tx) {
+  if (tx.is_transfer) return true
+  if (tx.category === 'transfer') return true
+  if (tx.category === 'investing') return true
+  // CC payment heuristic: large outgoing + payment keywords
+  const amt = Math.abs(parseFloat(tx.amount || 0))
+  if (parseFloat(tx.amount) < 0 && amt >= 100) {
+    const desc = (tx.description || tx.name || '').toUpperCase()
+    if (/PAYMENT|AUTOPAY|APPLE CARD|THANK YOU|ONLINE PMT/.test(desc)) return true
+  }
+  return false
+}
+
+function computeSpendStats(txList) {
+  const realTx = (txList || []).filter(isRealSpend)
+  const total  = realTx.reduce((s, t) => s + Math.abs(parseFloat(t.amount)), 0)
+  const byCategory = {}
+  for (const tx of realTx) {
+    const c = tx.category || 'other'
+    if (!byCategory[c]) byCategory[c] = { total: 0, count: 0 }
+    byCategory[c].total += Math.abs(parseFloat(tx.amount))
+    byCategory[c].count += 1
+  }
+  return { total, byCategory, txCount: realTx.length, transactions: realTx }
 }
 
 // ── Toast ─────────────────────────────────────────────────────────────────────
@@ -191,6 +235,11 @@ function useFinanceData() {
     try { return JSON.parse(localStorage.getItem(`aaron_finance_tx_${m}`) || '[]') }
     catch { return [] }
   })
+  const [lastMonthTransactions, setLastMonthTransactions] = useState(() => {
+    const pm = prevMonthStr(currentMonth())
+    try { return JSON.parse(localStorage.getItem(`aaron_finance_tx_${pm}`) || '[]') }
+    catch { return [] }
+  })
   const [enrollments,  setEnrollments]  = useState(() => {
     try { return JSON.parse(localStorage.getItem('aaron_teller_enrollments') || '[]') }
     catch { return [] }
@@ -226,8 +275,18 @@ function useFinanceData() {
       if (!res.ok) return
       const data = await res.json()
       setTransactions(data)
-      // Store per-month so switching months doesn't overwrite each other
       localStorage.setItem(`aaron_finance_tx_${m}`, JSON.stringify(data))
+    } catch { /* ignore */ }
+  }, [])
+
+  const loadLastMonthTransactions = useCallback(async (m) => {
+    const pm = prevMonthStr(m)
+    try {
+      const res  = await fetch(`/api/finance/transactions?month=${pm}&limit=200`)
+      if (!res.ok) return
+      const data = await res.json()
+      setLastMonthTransactions(data)
+      localStorage.setItem(`aaron_finance_tx_${pm}`, JSON.stringify(data))
     } catch { /* ignore */ }
   }, [])
 
@@ -240,7 +299,7 @@ function useFinanceData() {
         // come back populated and the dashboard shows. The teller/status check
         // was gating this unnecessarily when the Express server isn't running
         // (e.g. Vercel deployment).
-        await Promise.all([loadSummary(), loadTransactions(month)])
+        await Promise.all([loadSummary(), loadTransactions(month), loadLastMonthTransactions(month)])
       } catch { /* ignore */ }
       finally {
         setLoading(false)
@@ -255,7 +314,8 @@ function useFinanceData() {
   useEffect(() => {
     if (!didInit.current) return
     loadTransactions(month)
-  }, [month, loadTransactions])
+    loadLastMonthTransactions(month)
+  }, [month, loadTransactions, loadLastMonthTransactions])
 
   const sync = async () => {
     // FIX: 30-second cooldown prevents rapid-fire Teller API calls from button spam
@@ -274,7 +334,7 @@ function useFinanceData() {
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Sync failed')
       if (data.enrollments) setEnrollments(data.enrollments)
-      await Promise.all([loadSummary(), loadTransactions(month)])
+      await Promise.all([loadSummary(), loadTransactions(month), loadLastMonthTransactions(month)])
     } catch (err) {
       setError(err.message)
     } finally {
@@ -284,7 +344,7 @@ function useFinanceData() {
 
   const onTellerSuccess = async (data) => {
     if (data.enrollments) setEnrollments(data.enrollments)
-    await Promise.all([loadSummary(), loadTransactions(month)])
+    await Promise.all([loadSummary(), loadTransactions(month), loadLastMonthTransactions(month)])
   }
 
   const disconnect = async (enrollmentId) => {
@@ -298,11 +358,11 @@ function useFinanceData() {
     setEnrollments([])
     setSummary(null)
     setTransactions([])
-    // Clear all cached finance data so the "Link Your Bank" screen shows correctly
+    setLastMonthTransactions([])
     localStorage.removeItem('aaron_teller_enrollments')
     localStorage.removeItem('aaron_finance_summary')
     const now = new Date()
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < 7; i++) {
       const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
       const m = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`
       localStorage.removeItem(`aaron_finance_tx_${m}`)
@@ -352,7 +412,7 @@ function useFinanceData() {
   }
 
   return {
-    summary, transactions, enrollments, loading, syncing, error, month,
+    summary, transactions, lastMonthTransactions, enrollments, loading, syncing, error, month,
     setMonth, setError, sync, load: loadSummary, onTellerSuccess, disconnect, disconnectAll,
     updateAccountCategory, updateTransactionCategory,
   }
@@ -876,30 +936,37 @@ function normalizeMerchant(raw) {
   return s.trim().slice(0, 40) || 'Unknown'
 }
 
-function SpendingDetail({ summary, transactions, month, setMonth, onTxCategoryChange, subscriptions = [], onBack }) {
+function SpendingDetail({ summary, transactions, lastMonthTransactions = [], month, setMonth, onTxCategoryChange, subscriptions = [], onBack }) {
+  // ── Budget state ───────────────────────────────────────────────────────────
+  const [budget, setBudget] = useState(() => parseFloat(localStorage.getItem('aaron_spending_budget') || '0'))
+  const [budgetEditMode, setBudgetEditMode] = useState(false)
+  const [budgetInput, setBudgetInput]       = useState('')
+  const [showTransfers, setShowTransfers]   = useState(false)
+
+  const saveBudget = (v) => {
+    const n = parseFloat(v)
+    const val = !isNaN(n) && n > 0 ? n : 0
+    setBudget(val)
+    localStorage.setItem('aaron_spending_budget', String(val))
+    setBudgetEditMode(false)
+  }
+
   // ── Subscription review state ──────────────────────────────────────────────
   const [subChoices, setSubChoices] = useState(() => {
     try { return JSON.parse(localStorage.getItem('aaron_sub_choices') || '{}') }
     catch { return {} }
   })
 
-  // Sync choices with Supabase on mount:
-  // - Pull remote rows and merge (remote wins for conflicts)
-  // - Upload any local choices that aren't in Supabase yet (migration)
   useEffect(() => {
     if (!supabase) return
     sb(supabase.from('subscription_choices').select('merchant, choice'))
       .then(({ data } = {}) => {
         const remote = Object.fromEntries((data || []).map(r => [r.merchant, r.choice]))
         setSubChoices(prev => {
-          // Push local choices that Supabase doesn't have yet
           const toUpload = Object.entries(prev)
             .filter(([merchant]) => !remote[merchant])
             .map(([merchant, choice]) => ({ merchant, choice }))
-          if (toUpload.length) {
-            sb(supabase.from('subscription_choices').upsert(toUpload))
-          }
-          // Merge: remote wins for any conflicts
+          if (toUpload.length) sb(supabase.from('subscription_choices').upsert(toUpload))
           const merged = { ...prev, ...remote }
           localStorage.setItem('aaron_sub_choices', JSON.stringify(merged))
           return merged
@@ -911,13 +978,10 @@ function SpendingDetail({ summary, transactions, month, setMonth, onTxCategoryCh
     const next = { ...subChoices, [merchant]: choice }
     setSubChoices(next)
     localStorage.setItem('aaron_sub_choices', JSON.stringify(next))
-    if (supabase) {
-      sb(supabase.from('subscription_choices').upsert({ merchant, choice }))
-    }
+    if (supabase) sb(supabase.from('subscription_choices').upsert({ merchant, choice }))
   }
   const confirmedSubs = subscriptions.filter(s => subChoices[s.merchant] === 'yes')
   const pendingSubs   = subscriptions.filter(s => !subChoices[s.merchant])
-  const sp = summary?.spending
 
   // ── Date math ──────────────────────────────────────────────────────────────
   const now = new Date()
@@ -927,39 +991,53 @@ function SpendingDetail({ summary, transactions, month, setMonth, onTxCategoryCh
   const daysElapsed = isCurrentMonth ? now.getDate() : daysInMonth
   const daysLeft    = isCurrentMonth ? daysInMonth - now.getDate() : 0
 
-  // ── Core numbers ───────────────────────────────────────────────────────────
-  const income    = sp?.income   || 0
-  const expenses  = sp?.expenses || 0
-  const surplus   = sp?.surplus  || 0
-  const isDeficit = surplus < 0
-  const savingsRate = income > 0 ? Math.round((surplus / income) * 100) : null
-  const dailyRate   = daysElapsed > 0 ? expenses / daysElapsed : 0
-  const projected   = dailyRate * daysInMonth
-  const spendPct    = income > 0 ? Math.min((expenses / income) * 100, 100) : (expenses > 0 ? 100 : 0)
-
-  // ── All expense transactions (cash + credit, no transfers/income/investing) ─
-  const EXCLUDE   = new Set(['transfer', 'investing', 'income'])
-  const expenseTx = transactions.filter(t =>
-    !EXCLUDE.has(t.category) && parseFloat(t.amount) < 0 && !t.is_transfer
-  )
-  const txCount = expenseTx.length
-  const avgTx   = txCount > 0 ? expenses / txCount : 0
+  // ── Core spending stats (real spending only — excludes transfers, investing) ─
+  const stats      = computeSpendStats(transactions)
+  const spentSoFar = stats.total
+  const txCount    = stats.txCount
+  const avgTx      = txCount > 0 ? spentSoFar / txCount : 0
+  const dailyRate  = daysElapsed > 0 ? spentSoFar / daysElapsed : 0
+  const projected  = isCurrentMonth ? dailyRate * daysInMonth : spentSoFar
 
   // ── Category breakdown ─────────────────────────────────────────────────────
-  const byCategory = {}
-  for (const tx of expenseTx) {
-    const c   = tx.category || 'other'
-    const amt = Math.abs(parseFloat(tx.amount))
-    if (!byCategory[c]) byCategory[c] = { total: 0, count: 0 }
-    byCategory[c].total += amt
-    byCategory[c].count += 1
-  }
-  const catSorted = Object.entries(byCategory).sort((a, b) => b[1].total - a[1].total)
-  const catTotal  = catSorted.reduce((s, [, v]) => s + v.total, 0)
+  const catSorted = Object.entries(stats.byCategory).sort((a, b) => b[1].total - a[1].total)
+  const topCatId  = catSorted[0]?.[0]
+  const topCatInfo = CATEGORY_MAP[topCatId] || CATEGORY_MAP['other']
+
+  // ── Budget ─────────────────────────────────────────────────────────────────
+  const remaining   = budget > 0 ? budget - spentSoFar : null
+  const overBudget  = remaining !== null && remaining < 0
+  const pctOfBudget = budget > 0 ? Math.min((spentSoFar / budget) * 100, 120) : 0
+  const onTrack     = budget > 0 && isCurrentMonth ? projected <= budget : null
+
+  // ── Fixed vs Variable ─────────────────────────────────────────────────────
+  const fixedTotal = stats.transactions.filter(tx => tx.category === 'bills')
+    .reduce((s, t) => s + Math.abs(parseFloat(t.amount)), 0)
+  const varTotal   = stats.transactions.filter(tx => tx.category !== 'bills')
+    .reduce((s, t) => s + Math.abs(parseFloat(t.amount)), 0)
+
+  // ── Large transactions (>2× avg, min $50 floor) ────────────────────────────
+  const threshold = Math.max(avgTx * 2, 50)
+  const largeTx   = stats.transactions
+    .filter(tx => Math.abs(parseFloat(tx.amount)) > threshold)
+    .sort((a, b) => Math.abs(parseFloat(b.amount)) - Math.abs(parseFloat(a.amount)))
+
+  // ── Month-over-month comparison ────────────────────────────────────────────
+  const lastStats   = computeSpendStats(lastMonthTransactions)
+  const monthDelta  = spentSoFar - lastStats.total
+
+  // ── Transfers / excluded transactions ─────────────────────────────────────
+  const excludedTx = transactions
+    .filter(isExcluded)
+    .sort((a, b) => (b.date || '').localeCompare(a.date || ''))
+
+  // ── Cash flow (from summary — cash accounts only) ──────────────────────────
+  const sp     = summary?.spending
+  const income = sp?.income || 0
 
   // ── Merchant grouping ──────────────────────────────────────────────────────
   const byMerchant = {}
-  for (const tx of expenseTx) {
+  for (const tx of stats.transactions) {
     const key = normalizeMerchant(tx.description || tx.name)
     if (!byMerchant[key]) byMerchant[key] = { total: 0, count: 0, cat: tx.category }
     byMerchant[key].total += Math.abs(parseFloat(tx.amount))
@@ -971,9 +1049,9 @@ function SpendingDetail({ summary, transactions, month, setMonth, onTxCategoryCh
 
   // ── Spending by week ───────────────────────────────────────────────────────
   const weekBuckets = [0, 0, 0, 0, 0]
-  for (const tx of expenseTx) {
-    const day  = tx.date ? parseInt(tx.date.split('-')[2], 10) : 1
-    const w    = Math.min(Math.floor((day - 1) / 7), 4)
+  for (const tx of stats.transactions) {
+    const day = tx.date ? parseInt(tx.date.split('-')[2], 10) : 1
+    const w   = Math.min(Math.floor((day - 1) / 7), 4)
     weekBuckets[w] += Math.abs(parseFloat(tx.amount))
   }
   const weeks = []
@@ -993,50 +1071,45 @@ function SpendingDetail({ summary, transactions, month, setMonth, onTxCategoryCh
         <MonthSelector month={month} onChange={setMonth} />
       </div>
 
-      {/* ── Savings Rate hero ── */}
+      {/* ── 1. Top Summary Card ── */}
       <section className="page-section">
-        <div className="card fin-savings-hero">
-          <div className="fin-savings-top">
+        <div className="card fin-spend-summary-card">
+          <div className="fin-spend-summary-top">
             <div>
-              <div className="fin-savings-rate-label">Savings Rate</div>
-              <div className={`fin-savings-rate-value ${isDeficit ? 'negative' : 'positive'}`}>
-                {savingsRate !== null ? `${isDeficit ? '' : '+'}${savingsRate}%` : '—'}
-              </div>
-              <div className="fin-savings-sub">
-                {isDeficit
-                  ? `Overspending ${fmtUSD(Math.abs(surplus))} this month`
-                  : income > 0
-                    ? `Saving ${fmtUSD(surplus)} of ${fmtUSD(income)}`
-                    : 'No income recorded yet'}
-              </div>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4, letterSpacing: '0.05em' }}>SPENT THIS MONTH</div>
+              <div className="fin-spend-big-num">{fmtUSD(spentSoFar)}</div>
             </div>
-            <div className="fin-savings-pills">
-              <div className="fin-savings-pill">
-                <span className="positive">+{fmtUSD(income)}</span>
-                <span>Income</span>
+            {onTrack !== null && (
+              <div className={`fin-spend-chip ${onTrack ? 'fin-spend-chip--green' : 'fin-spend-chip--red'}`}>
+                {onTrack ? '✓ On Track' : '⚠ Over Budget'}
               </div>
-              <div className="fin-savings-pill">
-                <span className="negative">-{fmtUSD(expenses)}</span>
-                <span>Spent</span>
-              </div>
-            </div>
+            )}
           </div>
-          <div className="fin-spend-bar-track">
-            <div className={`fin-spend-bar-fill ${isDeficit ? 'deficit' : ''}`} style={{ width: `${spendPct}%` }} />
-          </div>
-          <div className="fin-spend-bar-labels">
-            <span>{Math.round(spendPct)}% of income spent</span>
-            {isCurrentMonth && daysLeft > 0 && <span>{daysLeft} days left</span>}
+          <div className="fin-spend-sub-row">
+            {isCurrentMonth && dailyRate > 0 && (
+              <span className="fin-spend-chip fin-spend-chip--muted">Proj. {fmtUSD(projected)}</span>
+            )}
+            {remaining !== null && (
+              <span className={`fin-spend-chip ${overBudget ? 'fin-spend-chip--red' : 'fin-spend-chip--green'}`}>
+                {overBudget ? `${fmtUSD(Math.abs(remaining))} over` : `${fmtUSD(remaining)} left`}
+              </span>
+            )}
+            {topCatInfo && spentSoFar > 0 && (
+              <span className="fin-spend-chip fin-spend-chip--muted">{topCatInfo.icon} {topCatInfo.label}</span>
+            )}
+            {isCurrentMonth && daysLeft > 0 && (
+              <span className="fin-spend-chip fin-spend-chip--muted">{daysLeft}d left</span>
+            )}
           </div>
         </div>
       </section>
 
-      {/* ── 3 quick stats ── */}
+      {/* ── 2. Quick Stats ── */}
       <section className="page-section">
         <div className="card fin-metrics-grid">
           <div className="fin-metric">
-            <span className="fin-metric-value">{fmtUSD(dailyRate)}</span>
-            <span className="fin-metric-label">Daily Spend</span>
+            <span className="fin-metric-value">{fmtUSD(dailyRate)}/d</span>
+            <span className="fin-metric-label">Burn Rate</span>
           </div>
           <div className="fin-metric-divider" />
           <div className="fin-metric">
@@ -1051,41 +1124,52 @@ function SpendingDetail({ summary, transactions, month, setMonth, onTxCategoryCh
         </div>
       </section>
 
-      {/* ── Cash Flow ── */}
+      {/* ── 3. Budget ── */}
       <section className="page-section">
-        <div className="card fin-cashflow-card">
-          <div className="fin-cf-title">Cash Flow</div>
-          <div className="fin-cf-row">
-            <span className="fin-cf-label">
-              {sp?.beginning_estimated ? 'Start Balance (est.)' : 'Start of Month'}
-            </span>
-            <span className="fin-cf-value">{fmtUSD(sp?.beginning_balance)}</span>
-          </div>
-          <div className="fin-cf-row">
-            <span className="fin-cf-label">+ Income</span>
-            <span className="fin-cf-value positive">+{fmtUSD(income)}</span>
-          </div>
-          <div className="fin-cf-row">
-            <span className="fin-cf-label">− Expenses</span>
-            <span className="fin-cf-value negative">-{fmtUSD(expenses)}</span>
-          </div>
-          {isCurrentMonth && dailyRate > 0 && (
-            <div className="fin-cf-row" style={{ opacity: 0.55 }}>
-              <span className="fin-cf-label">Projected total spend</span>
-              <span className={`fin-cf-value ${projected > income ? 'negative' : ''}`}>
-                -{fmtUSD(projected)}
-              </span>
+        {budgetEditMode ? (
+          <div className="card fin-budget-card">
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>Monthly spending budget</div>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <input
+                className="fin-budget-input"
+                type="number"
+                placeholder="e.g. 3000"
+                value={budgetInput}
+                onChange={e => setBudgetInput(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && saveBudget(budgetInput)}
+                autoFocus
+              />
+              <button className="fin-budget-save-btn" onClick={() => saveBudget(budgetInput)}>Save</button>
+              <button className="fin-budget-edit-btn" onClick={() => setBudgetEditMode(false)}>Cancel</button>
             </div>
-          )}
-          <div className="fin-cf-divider" />
-          <div className="fin-cf-row fin-cf-total">
-            <span className="fin-cf-label">Current Balance</span>
-            <span className="fin-cf-value">{fmtUSD(sp?.current_balance)}</span>
           </div>
-        </div>
+        ) : budget > 0 ? (
+          <>
+            <h2 className="section-title">Budget</h2>
+            <div className="card fin-budget-card">
+              <div className="fin-budget-bar-track">
+                <div className="fin-budget-bar-fill" style={{ width: `${Math.min(pctOfBudget, 100)}%`, background: overBudget ? 'var(--red)' : 'var(--accent)' }} />
+              </div>
+              <div className="fin-budget-labels">
+                <span>{fmtUSD(spentSoFar)} of {fmtUSD(budget)}</span>
+                <span className={overBudget ? 'negative' : 'positive'}>{Math.round(pctOfBudget)}%</span>
+              </div>
+              {overBudget && (
+                <div className="fin-budget-warning">Over budget by {fmtUSD(Math.abs(remaining))}</div>
+              )}
+              <button className="fin-budget-edit-btn" onClick={() => { setBudgetInput(String(budget)); setBudgetEditMode(true) }}>
+                Edit target
+              </button>
+            </div>
+          </>
+        ) : (
+          <button className="fin-budget-set-btn" onClick={() => { setBudgetInput(''); setBudgetEditMode(true) }}>
+            + Set monthly spending budget
+          </button>
+        )}
       </section>
 
-      {/* ── Where Money Went ── */}
+      {/* ── 4. Category Breakdown ── */}
       {catSorted.length > 0 && (
         <section className="page-section">
           <h2 className="section-title">Where Money Went</h2>
@@ -1093,7 +1177,7 @@ function SpendingDetail({ summary, transactions, month, setMonth, onTxCategoryCh
             <div className="spending-bars">
               {catSorted.map(([cat, { total, count }]) => {
                 const info = CATEGORY_MAP[cat]
-                const pct  = catTotal > 0 ? (total / catTotal) * 100 : 0
+                const pct  = spentSoFar > 0 ? (total / spentSoFar) * 100 : 0
                 return (
                   <div key={cat} className="spending-row">
                     <div className="spending-row-top">
@@ -1114,15 +1198,147 @@ function SpendingDetail({ summary, transactions, month, setMonth, onTxCategoryCh
                 )
               })}
               <div className="fin-cat-total-row">
-                <span>Total</span>
-                <span>{fmtUSD(catTotal)}</span>
+                <span>Total spending</span>
+                <span>{fmtUSD(spentSoFar)}</span>
               </div>
             </div>
           </div>
         </section>
       )}
 
-      {/* ── Spending by Week ── */}
+      {/* ── 5. Fixed vs Variable ── */}
+      {spentSoFar > 0 && (
+        <section className="page-section">
+          <h2 className="section-title">Fixed vs Variable</h2>
+          <div className="card fin-metrics-grid">
+            <div className="fin-metric">
+              <span className="fin-metric-value">{fmtUSD(fixedTotal)}</span>
+              <span className="fin-metric-label">🏠 Fixed (Bills)</span>
+            </div>
+            <div className="fin-metric-divider" />
+            <div className="fin-metric">
+              <span className="fin-metric-value">{fmtUSD(varTotal)}</span>
+              <span className="fin-metric-label">💳 Variable</span>
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* ── 6. Large Transactions ── */}
+      {largeTx.length > 0 && (
+        <section className="page-section">
+          <h2 className="section-title">Large Transactions</h2>
+          <p className="fin-section-note">Larger than 2× your avg ({fmtUSD(avgTx)})</p>
+          <div className="card-list">
+            {largeTx.map((tx, i) => (
+              <TxRow key={tx.transaction_id || tx.id || i} tx={tx} onCategoryChange={onTxCategoryChange} />
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* ── 7. Monthly Comparison ── */}
+      {lastMonthTransactions.length > 0 && (
+        <section className="page-section">
+          <h2 className="section-title">vs Last Month</h2>
+          <div className="card fin-compare-card">
+            <div className="fin-compare-row">
+              <span>{monthLabel(month)}</span>
+              <span style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtUSD(spentSoFar)}</span>
+            </div>
+            <div className="fin-compare-row" style={{ color: 'var(--text-muted)' }}>
+              <span>{monthLabel(prevMonthStr(month))}</span>
+              <span style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtUSD(lastStats.total)}</span>
+            </div>
+            <div className="fin-compare-delta-row">
+              <span>Change</span>
+              <span className={`fin-compare-cat-delta ${monthDelta >= 0 ? 'negative' : 'positive'}`}>
+                {monthDelta >= 0 ? '+' : ''}{fmtUSD(monthDelta)}
+              </span>
+            </div>
+            {(() => {
+              const allCats = new Set([...Object.keys(stats.byCategory), ...Object.keys(lastStats.byCategory)])
+              const catDeltas = [...allCats].map(cat => ({
+                cat,
+                delta: (stats.byCategory[cat]?.total || 0) - (lastStats.byCategory[cat]?.total || 0),
+              })).sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta)).slice(0, 5)
+              return (
+                <div className="fin-compare-cat-table">
+                  {catDeltas.map(({ cat, delta }) => {
+                    const info = CATEGORY_MAP[cat] || CATEGORY_MAP['other']
+                    return (
+                      <div key={cat} className="fin-compare-cat-row">
+                        <span>{info.icon} {info.label}</span>
+                        <span className={`fin-compare-cat-delta ${delta >= 0 ? 'negative' : 'positive'}`}>
+                          {delta >= 0 ? '+' : ''}{fmtUSD(delta)}
+                        </span>
+                      </div>
+                    )
+                  })}
+                </div>
+              )
+            })()}
+          </div>
+        </section>
+      )}
+
+      {/* ── 8. Cash Flow ── */}
+      <section className="page-section">
+        <div className="card fin-cashflow-card">
+          <div className="fin-cf-title">Cash Flow</div>
+          <div className="fin-cf-row">
+            <span className="fin-cf-label">
+              {sp?.beginning_estimated ? 'Start Balance (est.)' : 'Start of Month'}
+            </span>
+            <span className="fin-cf-value">{fmtUSD(sp?.beginning_balance)}</span>
+          </div>
+          <div className="fin-cf-row">
+            <span className="fin-cf-label">+ Income</span>
+            <span className="fin-cf-value positive">+{fmtUSD(income)}</span>
+          </div>
+          <div className="fin-cf-row">
+            <span className="fin-cf-label">− Spending</span>
+            <span className="fin-cf-value negative">-{fmtUSD(spentSoFar)}</span>
+          </div>
+          {isCurrentMonth && dailyRate > 0 && (
+            <div className="fin-cf-row" style={{ opacity: 0.55 }}>
+              <span className="fin-cf-label">Projected total spend</span>
+              <span className="fin-cf-value negative">-{fmtUSD(projected)}</span>
+            </div>
+          )}
+          <div className="fin-cf-divider" />
+          <div className="fin-cf-row fin-cf-total">
+            <span className="fin-cf-label">Current Balance</span>
+            <span className="fin-cf-value">{fmtUSD(sp?.current_balance)}</span>
+          </div>
+        </div>
+      </section>
+
+      {/* ── 9. Transfers & Excluded (collapsible) ── */}
+      {excludedTx.length > 0 && (
+        <section className="page-section">
+          <h2
+            className="section-title fin-transfers-toggle"
+            onClick={() => setShowTransfers(t => !t)}
+          >
+            Transfers & Excluded
+            <span className="fin-transfers-count">{excludedTx.length}</span>
+            <span className="fin-transfers-chevron">{showTransfers ? '∨' : '›'}</span>
+          </h2>
+          {showTransfers && (
+            <>
+              <p className="fin-section-note">Not counted in spending totals</p>
+              <div className="card-list">
+                {excludedTx.slice(0, 25).map((tx, i) => (
+                  <TxRow key={tx.transaction_id || tx.id || i} tx={tx} onCategoryChange={onTxCategoryChange} />
+                ))}
+              </div>
+            </>
+          )}
+        </section>
+      )}
+
+      {/* ── 10. Spending by Week ── */}
       {weeks.length > 0 && (
         <section className="page-section">
           <h2 className="section-title">Spending by Week</h2>
@@ -1140,7 +1356,7 @@ function SpendingDetail({ summary, transactions, month, setMonth, onTxCategoryCh
         </section>
       )}
 
-      {/* ── Confirmed Subscriptions ── */}
+      {/* ── 11. Confirmed Subscriptions ── */}
       {confirmedSubs.length > 0 && (
         <section className="page-section">
           <h2 className="section-title">Subscriptions</h2>
@@ -1176,7 +1392,7 @@ function SpendingDetail({ summary, transactions, month, setMonth, onTxCategoryCh
         </section>
       )}
 
-      {/* ── Pending review ── */}
+      {/* ── 12. Pending Subscription Review ── */}
       {pendingSubs.length > 0 && (
         <section className="page-section">
           <h2 className="section-title">Recurring — Is This A Subscription?</h2>
@@ -1203,7 +1419,7 @@ function SpendingDetail({ summary, transactions, month, setMonth, onTxCategoryCh
         </section>
       )}
 
-      {/* ── Top Merchants ── */}
+      {/* ── 13. Top Merchants ── */}
       {topMerchants.length > 0 && (
         <section className="page-section">
           <h2 className="section-title">Top Merchants</h2>
@@ -1532,6 +1748,7 @@ export default function Finance() {
     <SpendingDetail
       summary={data.summary}
       transactions={data.transactions}
+      lastMonthTransactions={data.lastMonthTransactions}
       month={data.month}
       setMonth={data.setMonth}
       onTxCategoryChange={data.updateTransactionCategory}
