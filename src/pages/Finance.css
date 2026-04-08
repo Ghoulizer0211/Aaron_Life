@@ -559,6 +559,26 @@
 .fin-toast button   { background: none; border: none; color: inherit; font-size: 18px; cursor: pointer; margin-left: auto; line-height: 1; }
 @keyframes slideUpFade { from { opacity:0; transform:translateX(-50%) translateY(12px); } to { opacity:1; transform:translateX(-50%) translateY(0); } }
 
+/* ── Home dashboard wrapper ───────────────────────────────────────────────────── */
+.fin-home {
+  height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+.fin-home-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px 16px 32px;
+}
+.fin-toolbar-title {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: 1px;
+}
+
 /* ── Toolbar ─────────────────────────────────────────────────────────────────── */
 .fin-toolbar {
   display: flex;
@@ -1296,90 +1316,61 @@
 }
 .fin-error-banner button { background: none; border: none; color: var(--red); cursor: pointer; font-size: 16px; }
 
-/* ── Spending Analysis — Summary card ───────────────────────────────────────── */
-.fin-spend-summary-card {
-  padding: 18px 16px 14px;
+/* ── Spending Analysis — Hero card ───────────────────────────────────────────── */
+.fin-sa-hero {
+  padding: 20px 16px 16px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
 }
-.fin-spend-summary-top {
+.fin-sa-hero-top {
   display: flex;
-  align-items: flex-start;
   justify-content: space-between;
+  align-items: flex-start;
 }
-.fin-spend-big-num {
-  font-size: 32px;
+.fin-sa-eyebrow {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+.fin-sa-hero-num {
+  font-size: 38px;
   font-weight: 700;
   font-family: 'Orbitron', sans-serif;
   font-variant-numeric: tabular-nums;
   color: var(--text-primary);
   line-height: 1;
 }
-.fin-spend-sub-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-/* ── Chip badges ─────────────────────────────────────────────────────────────── */
-.fin-spend-chip {
-  font-size: 11px;
-  font-weight: 600;
-  border-radius: 12px;
-  padding: 3px 10px;
-  border: 1px solid var(--border);
-  background: var(--bg-secondary);
+.fin-sa-muted {
   color: var(--text-muted);
-  letter-spacing: 0.03em;
-  white-space: nowrap;
 }
-.fin-spend-chip--green {
-  background: rgba(0, 255, 157, 0.1);
-  border-color: rgba(0, 255, 157, 0.3);
-  color: var(--green);
-}
-.fin-spend-chip--red {
-  background: rgba(255, 56, 100, 0.1);
-  border-color: rgba(255, 56, 100, 0.3);
-  color: var(--red);
-}
-.fin-spend-chip--muted {
-  opacity: 0.75;
-}
-
-/* ── Budget card ─────────────────────────────────────────────────────────────── */
-.fin-budget-card {
-  padding: 14px 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.fin-budget-bar-track {
-  height: 8px;
+.fin-sa-budget-bar-track {
+  height: 6px;
   background: var(--border);
-  border-radius: 4px;
+  border-radius: 3px;
   overflow: hidden;
 }
-.fin-budget-bar-fill {
+.fin-sa-budget-bar-fill {
   height: 100%;
-  border-radius: 4px;
-  background: var(--accent);
+  border-radius: 3px;
   transition: width 0.4s ease;
 }
-.fin-budget-labels {
+.fin-sa-hero-budget-row {
   display: flex;
   justify-content: space-between;
-  font-size: 12px;
-  color: var(--text-muted);
+  font-size: 13px;
+  color: var(--text-secondary);
   font-variant-numeric: tabular-nums;
 }
-.fin-budget-warning {
-  font-size: 12px;
-  color: var(--red);
-  font-weight: 600;
+.fin-sa-budget-edit-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
 }
-.fin-budget-edit-btn {
+.fin-sa-link-btn {
   background: none;
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -1388,34 +1379,61 @@
   font-family: inherit;
   padding: 5px 12px;
   cursor: pointer;
-  align-self: flex-start;
+  white-space: nowrap;
+  flex-shrink: 0;
   transition: border-color 0.15s, color 0.15s;
 }
-.fin-budget-edit-btn:hover { border-color: var(--accent); color: var(--accent); }
-.fin-budget-save-btn {
-  background: var(--accent);
-  border: none;
-  border-radius: 8px;
-  color: #000;
-  font-size: 13px;
-  font-weight: 700;
-  font-family: inherit;
-  padding: 6px 16px;
-  cursor: pointer;
-}
-.fin-budget-set-btn {
-  width: 100%;
+.fin-sa-link-btn:hover { border-color: var(--accent); color: var(--accent); }
+.fin-sa-set-budget-btn {
   background: none;
   border: 1px dashed var(--border);
-  border-radius: 10px;
-  color: var(--text-muted);
+  border-radius: 8px;
+  color: var(--accent);
   font-size: 13px;
   font-family: inherit;
-  padding: 12px;
+  padding: 10px;
   cursor: pointer;
-  transition: border-color 0.15s, color 0.15s;
+  transition: border-color 0.15s;
 }
-.fin-budget-set-btn:hover { border-color: var(--accent); color: var(--accent); }
+.fin-sa-set-budget-btn:hover { border-color: var(--accent); }
+
+/* Hero stats — 2×2 grid */
+.fin-sa-hero-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  border-top: 1px solid var(--border);
+  margin-top: 4px;
+}
+.fin-sa-hero-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.fin-sa-hero-stat:nth-child(odd) {
+  border-right: 1px solid var(--border);
+}
+.fin-sa-hero-stat-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+.fin-sa-hero-stat-val {
+  font-size: 16px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+}
+
+/* ── Budget edit form ────────────────────────────────────────────────────────── */
+.fin-budget-card {
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
 .fin-budget-input {
   flex: 1;
   background: var(--bg-secondary);
@@ -1426,51 +1444,194 @@
   font-family: inherit;
   padding: 8px 12px;
   outline: none;
+  min-width: 0;
 }
 .fin-budget-input:focus { border-color: var(--accent); }
-
-/* ── Month comparison card ───────────────────────────────────────────────────── */
-.fin-compare-card {
-  padding: 14px 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.fin-compare-row {
-  display: flex;
-  justify-content: space-between;
-  font-size: 14px;
-  color: var(--text-primary);
-  padding: 2px 0;
-}
-.fin-compare-delta-row {
-  display: flex;
-  justify-content: space-between;
-  font-size: 14px;
+.fin-budget-save-btn {
+  background: var(--accent);
+  border: none;
+  border-radius: 8px;
+  color: #000;
+  font-size: 13px;
   font-weight: 700;
-  padding: 8px 0 6px;
-  border-top: 1px solid var(--border);
-  margin-top: 2px;
+  font-family: inherit;
+  padding: 8px 16px;
+  cursor: pointer;
+  white-space: nowrap;
 }
-.fin-compare-cat-table {
+.fin-budget-edit-btn {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-family: inherit;
+  padding: 8px 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+/* ── Pie chart + legend ──────────────────────────────────────────────────────── */
+.fin-pie-card {
+  padding: 16px;
+  display: flex;
+  gap: 14px;
+  align-items: center;
+}
+.fin-pie-card svg { flex-shrink: 0; }
+.fin-pie-legend {
+  flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 8px;
+  min-width: 0;
+}
+.fin-pie-legend-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.fin-pie-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.fin-pie-cat {
+  flex: 1;
+  color: var(--text-secondary);
+  font-size: 13px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fin-pie-pct {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+  width: 34px;
+  text-align: right;
+  flex-shrink: 0;
+}
+.fin-pie-amt {
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+  width: 62px;
+  text-align: right;
+  flex-shrink: 0;
+}
+.fin-pie-total-row {
+  display: flex;
+  justify-content: space-between;
   border-top: 1px solid var(--border);
   padding-top: 8px;
   margin-top: 2px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
 }
-.fin-compare-cat-row {
+
+/* ── Daily spend chart ───────────────────────────────────────────────────────── */
+.fin-daily-chart-card { padding: 14px 16px 10px; }
+.fin-daily-chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 72px;
+  margin-bottom: 8px;
+}
+.fin-daily-bar-wrap {
+  flex: 1;
+  height: 100%;
+  display: flex;
+  align-items: flex-end;
+}
+.fin-daily-bar {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: flex-end;
+}
+.fin-daily-bar-fill {
+  width: 100%;
+  border-radius: 2px 2px 0 0;
+  background: var(--accent);
+  opacity: 0.7;
+  transition: height 0.3s ease;
+}
+.fin-daily-axis {
   display: flex;
   justify-content: space-between;
-  font-size: 12px;
+  font-size: 11px;
   color: var(--text-muted);
-  padding: 2px 0;
+  margin-top: 4px;
 }
-.fin-compare-cat-delta {
-  font-size: 12px;
-  font-weight: 600;
+
+/* ── Monthly comparison card ─────────────────────────────────────────────────── */
+.fin-sa-compare-card {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.fin-sa-cmp-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 16px;
+}
+.fin-sa-cmp-month {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+}
+.fin-sa-cmp-month--right {
+  align-items: flex-end;
+  text-align: right;
+}
+.fin-sa-cmp-num {
+  font-size: 20px;
+  font-weight: 700;
+  font-family: 'Orbitron', sans-serif;
   font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+}
+.fin-sa-cmp-bars-v {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  height: 60px;
+  flex-shrink: 0;
+}
+.fin-sa-cmp-bar-v-wrap {
+  width: 28px;
+  height: 100%;
+  display: flex;
+  align-items: flex-end;
+}
+.fin-sa-cmp-bar-v-track {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: flex-end;
+}
+.fin-sa-cmp-bar-v-fill {
+  width: 100%;
+  border-radius: 3px 3px 0 0;
+  min-height: 4px;
+  transition: height 0.3s ease;
+}
+.fin-sa-cmp-delta-row {
+  font-size: 14px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
 }
 
 /* ── Section note / helper text ──────────────────────────────────────────────── */
@@ -1502,4 +1663,510 @@
   margin-left: auto;
   color: var(--text-muted);
   font-size: 14px;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   NEW DASHBOARD LAYOUT
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* ── Shell ─────────────────────────────────────────────────────────── */
+.fin-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg-secondary);
+}
+
+/* ── Top bar ───────────────────────────────────────────────────────── */
+.fin-top-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px 0;
+  flex-shrink: 0;
+}
+
+/* ── Month bar ─────────────────────────────────────────────────────── */
+.fin-month-bar {
+  display: flex;
+  gap: 5px;
+  overflow-x: auto;
+  padding: 4px 0 6px;
+  scrollbar-width: none;
+  flex: 1;
+}
+.fin-month-bar::-webkit-scrollbar { display: none; }
+
+.fin-month-pill {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 700;
+  font-family: 'Orbitron', sans-serif;
+  letter-spacing: 0.5px;
+  padding: 5px 11px;
+  border-radius: 6px;
+  border: 1px solid rgba(255,255,255,0.1);
+  background: rgba(255,255,255,0.04);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+  -webkit-tap-highlight-color: transparent;
+}
+.fin-month-pill--active {
+  background: var(--accent-dim);
+  border-color: var(--accent);
+  color: var(--accent);
+  box-shadow: 0 2px 10px rgba(0,229,255,0.2);
+}
+
+/* ── Top action icons ──────────────────────────────────────────────── */
+.fin-top-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.fin-icon-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.1);
+  color: var(--text-secondary);
+  font-size: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.15s, color 0.15s;
+  -webkit-tap-highlight-color: transparent;
+}
+.fin-icon-btn:active  { background: rgba(157,101,255,0.2); color: #9d65ff; }
+.fin-icon-btn:disabled { opacity: 0.4; }
+
+/* Add account dropdown */
+.fin-add-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 200;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  min-width: 190px;
+  box-shadow: 0 6px 24px rgba(0,0,0,0.5);
+  overflow: hidden;
+}
+.fin-add-menu button {
+  display: block;
+  width: 100%;
+  padding: 11px 16px;
+  text-align: left;
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.fin-add-menu button:last-child { border-bottom: none; }
+.fin-add-menu button:active { background: rgba(255,255,255,0.06); }
+
+/* ── View tab strip (horizontal, below month bar) ──────────────────── */
+.fin-nav {
+  display: flex;
+  gap: 4px;
+  padding: 4px 12px 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  flex-shrink: 0;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.fin-nav::-webkit-scrollbar { display: none; }
+.fin-nav-btn {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 600;
+  font-family: 'Orbitron', sans-serif;
+  letter-spacing: 0.3px;
+  padding: 5px 14px;
+  border-radius: 20px;
+  border: 1px solid rgba(255,255,255,0.1);
+  background: rgba(255,255,255,0.04);
+  color: rgba(255,255,255,0.35);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s;
+  -webkit-tap-highlight-color: transparent;
+}
+.fin-nav-btn--active {
+  background: var(--accent-dim);
+  border-color: var(--accent);
+  color: var(--accent);
+  box-shadow: 0 0 8px rgba(0,229,255,0.15);
+}
+
+/* ── Content area ──────────────────────────────────────────────────── */
+.fin-content {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 12px 12px 16px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255,255,255,0.08) transparent;
+  -webkit-overflow-scrolling: touch;
+}
+.fin-content::-webkit-scrollbar { width: 3px; }
+.fin-content::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 2px; }
+
+/* ── Generic dashboard card ────────────────────────────────────────── */
+.fin-dash-card {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 16px;
+  padding: 14px;
+  overflow: hidden;
+}
+.fin-dash-card-title {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: rgba(255,255,255,0.35);
+  margin-bottom: 10px;
+}
+
+/* 2-column grid */
+.fin-dash-row2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+/* ── Dashboard layout ──────────────────────────────────────────────── */
+.fin-dashboard {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* Income/Expense header inside chart card */
+.fin-dash-ie-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.fin-dash-income-lbl,
+.fin-dash-expense-lbl {
+  font-size: 12px;
+  color: rgba(255,255,255,0.45);
+}
+.fin-dash-income-val {
+  font-size: 15px;
+  font-weight: 700;
+  color: #fff;
+  margin-left: 5px;
+  font-variant-numeric: tabular-nums;
+}
+.fin-dash-expense-val {
+  font-size: 15px;
+  font-weight: 700;
+  color: #e054a4;
+  margin-left: 5px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Ratio card */
+.fin-dash-ratio { }
+.fin-ratio-legend {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  font-size: 10px;
+  color: rgba(255,255,255,0.45);
+  margin-top: 4px;
+}
+.fin-ratio-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* Credit card */
+.fin-cc-widget { display: flex; flex-direction: column; gap: 10px; }
+.fin-cc-visual {
+  background: linear-gradient(135deg, #1a2060 0%, #2d3a9c 50%, #1a2060 100%);
+  border-radius: 10px;
+  padding: 12px 14px;
+  min-height: 72px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  border: 1px solid rgba(255,255,255,0.1);
+}
+.fin-cc-visual-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.fin-cc-chip-icon { font-size: 18px; color: #ffd700; }
+.fin-cc-icons { font-size: 11px; color: rgba(255,255,255,0.6); letter-spacing: 1px; }
+.fin-cc-num { font-size: 10px; color: rgba(255,255,255,0.4); letter-spacing: 3px; margin-top: 6px; }
+.fin-cc-bal-row { display: flex; justify-content: space-between; align-items: baseline; }
+.fin-cc-bal-label { font-size: 11px; color: rgba(255,255,255,0.45); }
+.fin-cc-bal-val {
+  font-size: 17px;
+  font-weight: 700;
+  color: #fff;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Budget/invest mini cards */
+.fin-dash-budget,
+.fin-dash-invest { display: flex; flex-direction: column; }
+.fin-dash-invest-val {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--green);
+  font-variant-numeric: tabular-nums;
+  margin-top: 8px;
+}
+.fin-dash-no-budget {
+  font-size: 11px;
+  color: rgba(255,255,255,0.3);
+  text-align: center;
+  padding: 20px 0;
+}
+
+/* ── Donut chart ───────────────────────────────────────────────────── */
+.fin-donut-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto;
+}
+.fin-donut-center {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+.fin-donut-pct {
+  font-size: 20px;
+  font-weight: 700;
+  font-family: 'Orbitron', sans-serif;
+  color: #fff;
+  line-height: 1;
+}
+.fin-donut-label {
+  font-size: 8px;
+  color: rgba(255,255,255,0.4);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-top: 3px;
+  text-align: center;
+}
+
+/* ── Summary list (dashboard bottom) ──────────────────────────────── */
+.fin-sum-list {
+  display: flex;
+  flex-direction: column;
+}
+.fin-sum-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 2px;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+  background: none;
+  border-left: none;
+  border-right: none;
+  border-top: none;
+  border-radius: 0;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.12s;
+  -webkit-tap-highlight-color: transparent;
+}
+.fin-sum-item:last-child { border-bottom: none; }
+.fin-sum-item:active { background: rgba(255,255,255,0.04); border-radius: 10px; }
+.fin-si-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  border: 1px solid;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  flex-shrink: 0;
+}
+.fin-si-info { flex: 1; display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.fin-si-label { font-size: 12px; color: rgba(255,255,255,0.45); }
+.fin-si-value {
+  font-size: 15px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.fin-si-arrow { font-size: 18px; color: rgba(255,255,255,0.2); flex-shrink: 0; }
+
+/* ── Monthly bar chart ─────────────────────────────────────────────── */
+.fin-monthly-chart { }
+.fin-monthly-chart-axis {
+  display: flex;
+  justify-content: space-between;
+  font-size: 8px;
+  font-family: 'Orbitron', sans-serif;
+  color: rgba(255,255,255,0.3);
+  margin-top: 4px;
+  padding: 0 2px;
+}
+
+/* ── Horizontal bar chart ──────────────────────────────────────────── */
+.fin-horiz-chart {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.fin-horiz-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.fin-horiz-label {
+  font-size: 10px;
+  color: rgba(255,255,255,0.5);
+  width: 80px;
+  flex-shrink: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: right;
+}
+.fin-horiz-track {
+  flex: 1;
+  height: 5px;
+  background: rgba(255,255,255,0.05);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.fin-horiz-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.45s ease;
+  min-width: 2px;
+}
+.fin-horiz-amt {
+  font-size: 10px;
+  font-weight: 600;
+  color: rgba(255,255,255,0.5);
+  font-variant-numeric: tabular-nums;
+  width: 46px;
+  flex-shrink: 0;
+  text-align: right;
+}
+
+/* ── Chart legend ──────────────────────────────────────────────────── */
+.fin-chart-legend {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  color: rgba(255,255,255,0.35);
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+.fin-legend-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: inline-block;
+}
+.fin-legend-line {
+  display: inline-block;
+  width: 16px;
+  height: 2px;
+  background: #e054a4;
+  border-radius: 1px;
+  margin-left: 12px;
+  vertical-align: middle;
+}
+
+/* ── Budgeting view ────────────────────────────────────────────────── */
+.fin-budget-view {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.fin-budget-top {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+}
+.fin-budget-donut-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex-shrink: 0;
+}
+.fin-budget-table {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.fin-bb-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 5px;
+  font-weight: 700;
+  font-size: 12px;
+}
+.fin-bb-head span:first-child { flex: 1; }
+.fin-bb-head span:nth-child(2) { font-variant-numeric: tabular-nums; color: #fff; font-size: 13px; }
+.fin-bb-head span:last-child { width: 30px; text-align: right; font-size: 11px; }
+.fin-bb-income { color: var(--accent); }
+.fin-bb-expense { color: var(--red); }
+.fin-bb-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 0;
+  font-size: 10px;
+  color: rgba(255,255,255,0.4);
+}
+.fin-bb-row span:first-child { flex: 1; }
+.fin-bb-row span:nth-child(2) { font-variant-numeric: tabular-nums; font-size: 10px; }
+.fin-bb-row span:last-child { width: 28px; text-align: right; font-size: 10px; }
+
+/* Pie layout inside budget/spending */
+.fin-pie-layout {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+.fin-pie-layout svg { flex-shrink: 0; }
+
+/* ── Expenses view ─────────────────────────────────────────────────── */
+.fin-expenses-view {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }

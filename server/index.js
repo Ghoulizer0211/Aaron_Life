@@ -354,8 +354,10 @@ async function fetchAllTellerData(preFetchedAccounts = {}) {
           const rawTx = await tellerFetch(txPath, enrollment.accessToken)
           console.log(`[teller] got ${rawTx.length} tx for ${acc.name} (start_date=${startDate})`)
 
-          const flipSign = (acc.type === 'credit' || acc.subtype === 'credit_card') &&
-                           enrollment.institutionName?.toLowerCase().includes('navy')
+          // Credit accounts: Teller returns positive=charge, negative=payment.
+          // Flip so our convention is negative=charge (red), positive=payment (green).
+          // Also check category_group in case Teller returns an unexpected type for some banks (e.g. Navy Fed).
+          const isCreditAcct = acc.type === 'credit' || acc.subtype === 'credit_card' || category_group === 'credit'
           const txObjs = rawTx.map(tx => {
             // Prefer Teller's counterparty name (clean merchant name) over raw bank description
             const displayName = tx.details?.counterparty?.name || tx.description
@@ -364,7 +366,7 @@ async function fetchAllTellerData(preFetchedAccounts = {}) {
               transaction_id: tx.id,
               name:           displayName,
               description:    displayName,
-              amount:         flipSign ? -parseFloat(tx.amount) : parseFloat(tx.amount),
+              amount:         isCreditAcct ? -parseFloat(tx.amount) : parseFloat(tx.amount),
               category:       mapTellerCategory(tx.details?.category),
               date:           tx.date,
               accountId:      tx.account_id,
@@ -519,6 +521,39 @@ app.get('/api/teller/sync', async (req, res) => {
   } catch (err) {
     console.error('teller/sync error:', err.message)
     res.status(500).json({ error: err.message })
+  }
+})
+
+// GET /api/teller/debug-navy — raw Teller amounts for Navy Fed credit accounts (no transformation)
+app.get('/api/teller/debug-navy', async (req, res) => {
+  const tokens = readTokens()
+  const enrollments = tokens.enrollments || []
+  const navyEnrollment = enrollments.find(e => e.institutionName?.toLowerCase().includes('navy'))
+  if (!navyEnrollment) return res.status(404).json({ error: 'No Navy Fed enrollment found in local tokens' })
+
+  try {
+    const accounts = await tellerFetch('/accounts', navyEnrollment.accessToken)
+    const creditAccounts = accounts.filter(a => a.type === 'credit' || a.subtype === 'credit_card')
+
+    const result = await Promise.all(creditAccounts.map(async (acc) => {
+      const rawTx = await tellerFetch(`/accounts/${acc.id}/transactions?count=10`, navyEnrollment.accessToken)
+      return {
+        account: { id: acc.id, name: acc.name, type: acc.type, subtype: acc.subtype, last_four: acc.last_four },
+        transactions: rawTx.slice(0, 10).map(tx => ({
+          id:          tx.id,
+          date:        tx.date,
+          description: tx.description,
+          raw_amount:  tx.amount,            // exact value Teller returns — no transformation
+          amount_type: parseFloat(tx.amount) > 0 ? 'POSITIVE' : parseFloat(tx.amount) < 0 ? 'NEGATIVE' : 'ZERO',
+          category:    tx.details?.category,
+          status:      tx.status,
+        })),
+      }
+    }))
+
+    return res.json({ institution: navyEnrollment.institutionName, accounts: result })
+  } catch (err) {
+    return res.status(500).json({ error: err.message })
   }
 })
 
@@ -1445,17 +1480,47 @@ app.delete('/api/gym/logs/:id', async (req, res) => {
   res.json({ success: true })
 })
 
+async function lastPerfByNames(names, beforeDate) {
+  const { data: exLogs } = await supabase
+    .from('exercise_logs')
+    .select('exercise_name, sets_data, log_id')
+    .in('exercise_name', names)
+    .eq('skipped', false)
+  if (!exLogs?.length) return {}
+
+  const logIds = [...new Set(exLogs.map(e => e.log_id))]
+  const { data: wlogs } = await supabase
+    .from('workout_logs').select('id, date').in('id', logIds)
+  const dateMap = Object.fromEntries((wlogs || []).map(l => [l.id, l.date]))
+
+  const best = {}
+  for (const el of exLogs) {
+    const date = dateMap[el.log_id]
+    if (!date || (beforeDate && date >= beforeDate)) continue
+    if (!el.sets_data?.some(s => s.weight || s.reps)) continue
+    if (!best[el.exercise_name] || date > best[el.exercise_name].date) {
+      best[el.exercise_name] = { date, sets_data: el.sets_data || [] }
+    }
+  }
+  const result = {}
+  for (const [name, val] of Object.entries(best)) result[name] = val.sets_data
+  return result
+}
+
 app.get('/api/gym/last-performance/:dayId', async (req, res) => {
   if (!supabase) return res.json({})
-  const { data: lastLog } = await supabase
-    .from('workout_logs').select('id').eq('day_id', req.params.dayId)
-    .order('date', { ascending: false }).limit(1).maybeSingle()
-  if (!lastLog) return res.json({})
-  const { data: exLogs } = await supabase
-    .from('exercise_logs').select('*').eq('log_id', lastLog.id).eq('skipped', false)
-  const result = {}
-  for (const el of (exLogs || [])) result[el.exercise_name] = el.sets_data || []
-  res.json(result)
+  const { data: dayExercises } = await supabase
+    .from('workout_exercises').select('exercise_name').eq('day_id', req.params.dayId)
+  if (!dayExercises?.length) return res.json({})
+  const names = dayExercises.map(e => e.exercise_name)
+  res.json(await lastPerfByNames(names, req.query.beforeDate))
+})
+
+app.get('/api/gym/last-performance-by-names', async (req, res) => {
+  if (!supabase) return res.json({})
+  const names = (req.query.names || '').split(',').map(n => n.trim()).filter(Boolean)
+  if (!names.length) return res.json({})
+  res.json(await lastPerfByNames(names, req.query.beforeDate))
 })
 
 // ─── Security (PIN + Biometric) ───────────────────────────────────────────────

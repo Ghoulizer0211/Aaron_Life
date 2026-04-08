@@ -20,6 +20,8 @@ const CATEGORIES = [
 const CATEGORY_MAP    = Object.fromEntries(CATEGORIES.map(c => [c.id, c]))
 const CATEGORY_COLORS = Object.fromEntries(CATEGORIES.map(c => [c.id, c.color]))
 
+const MONTH_NAMES = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC']
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function fmtUSD(n) {
@@ -87,6 +89,15 @@ function computeSpendStats(txList) {
     byCategory[c].count += 1
   }
   return { total, byCategory, txCount: realTx.length, transactions: realTx }
+}
+
+function computeIncomeStats(txList) {
+  const incomeTx = (txList || []).filter(t => {
+    const amt = parseFloat(t.amount)
+    return amt > 0 && !t.is_transfer && t.category !== 'transfer' && t.category !== 'investing'
+  })
+  const total = incomeTx.reduce((s, t) => s + parseFloat(t.amount), 0)
+  return { total, count: incomeTx.length, transactions: incomeTx }
 }
 
 // ── Toast ─────────────────────────────────────────────────────────────────────
@@ -416,6 +427,48 @@ function useFinanceData() {
     setMonth, setError, sync, load: loadSummary, onTellerSuccess, disconnect, disconnectAll,
     updateAccountCategory, updateTransactionCategory,
   }
+}
+
+// ── Year-level data hook ──────────────────────────────────────────────────────
+
+function useYearData() {
+  const year = new Date().getFullYear()
+  const [yearData, setYearData] = useState(() => {
+    try { return JSON.parse(localStorage.getItem(`aaron_year_data_${year}`) || '{}') }
+    catch { return {} }
+  })
+
+  useEffect(() => {
+    async function load() {
+      const now = new Date()
+      const currentMonthNum = now.getMonth() + 1
+      const months = []
+      for (let m = 1; m <= currentMonthNum; m++) {
+        months.push(`${year}-${String(m).padStart(2, '0')}`)
+      }
+      try {
+        const results = await Promise.allSettled(
+          months.map(m =>
+            fetch(`/api/finance/transactions?month=${m}&limit=500`)
+              .then(r => r.ok ? r.json() : [])
+          )
+        )
+        const data = {}
+        months.forEach((m, i) => {
+          const txs = results[i].status === 'fulfilled' ? (results[i].value || []) : []
+          data[m] = {
+            income:   computeIncomeStats(txs).total,
+            expenses: computeSpendStats(txs).total,
+          }
+        })
+        setYearData(data)
+        localStorage.setItem(`aaron_year_data_${year}`, JSON.stringify(data))
+      } catch { /* ignore */ }
+    }
+    load()
+  }, [year]) // eslint-disable-line
+
+  return yearData
 }
 
 // ── Subscription detection ────────────────────────────────────────────────────
@@ -936,12 +989,664 @@ function normalizeMerchant(raw) {
   return s.trim().slice(0, 40) || 'Unknown'
 }
 
-function SpendingDetail({ summary, transactions, lastMonthTransactions = [], month, setMonth, onTxCategoryChange, subscriptions = [], onBack }) {
-  // ── Budget state ───────────────────────────────────────────────────────────
-  const [budget, setBudget] = useState(() => parseFloat(localStorage.getItem('aaron_spending_budget') || '0'))
+// ── Pie chart helper ──────────────────────────────────────────────────────────
+function polarToCartesian(cx, cy, r, deg) {
+  const rad = ((deg - 90) * Math.PI) / 180
+  return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) }
+}
+
+function SpendingPieChart({ segments, size = 140 }) {
+  const cx = size / 2, cy = size / 2
+  const outer = size / 2 - 3
+  const inner = outer * 0.52   // donut hole
+
+  // Single slice: full donut ring
+  if (segments.length === 1) return (
+    <svg width={size} height={size}>
+      <circle cx={cx} cy={cy} r={outer} fill={segments[0].color} />
+      <circle cx={cx} cy={cy} r={inner} fill="var(--bg-card)" />
+    </svg>
+  )
+
+  let angle = 0
+  const slices = segments.map(({ pct, color }) => {
+    if (pct <= 0) return null
+    const sweep = (pct / 100) * 360
+    const a1 = polarToCartesian(cx, cy, outer, angle)
+    const a2 = polarToCartesian(cx, cy, outer, angle + sweep)
+    const b1 = polarToCartesian(cx, cy, inner, angle)
+    const b2 = polarToCartesian(cx, cy, inner, angle + sweep)
+    const lg = sweep > 180 ? 1 : 0
+    const d = `M${a1.x} ${a1.y} A${outer} ${outer} 0 ${lg} 1 ${a2.x} ${a2.y} L${b2.x} ${b2.y} A${inner} ${inner} 0 ${lg} 0 ${b1.x} ${b1.y}Z`
+    angle += sweep
+    return { d, color }
+  }).filter(Boolean)
+
+  return (
+    <svg width={size} height={size}>
+      {slices.map((s, i) => (
+        <path key={i} d={s.d} fill={s.color} stroke="var(--bg-card)" strokeWidth={1.5} />
+      ))}
+    </svg>
+  )
+}
+
+// ── Month Bar ─────────────────────────────────────────────────────────────────
+
+function MonthBar({ selectedMonth, onSelect }) {
+  const scrollRef = useRef(null)
+  const now = new Date()
+  const currentYear = now.getFullYear()
+  const currentMonthIdx = now.getMonth()
+
+  const months = []
+  for (let m = 0; m <= currentMonthIdx; m++) {
+    months.push(`${currentYear}-${String(m + 1).padStart(2, '0')}`)
+  }
+
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    const active = el.querySelector('.fin-month-pill--active')
+    if (active) active.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' })
+  }, [selectedMonth])
+
+  return (
+    <div className="fin-month-bar" ref={scrollRef}>
+      {months.map(m => {
+        const mIdx = parseInt(m.split('-')[1]) - 1
+        return (
+          <button
+            key={m}
+            className={`fin-month-pill${m === selectedMonth ? ' fin-month-pill--active' : ''}`}
+            onClick={() => onSelect(m)}
+          >
+            {MONTH_NAMES[mIdx]}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+// ── Finance Nav (horizontal tab strip) ───────────────────────────────────────
+
+const FIN_VIEWS = [
+  { id: 'dashboard', label: 'Dashboard' },
+  { id: 'budgeting', label: 'Budget'    },
+  { id: 'expenses',  label: 'Expenses'  },
+]
+
+function FinNav({ view, onView }) {
+  const scrollRef = useRef(null)
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    const active = el.querySelector('.fin-nav-btn--active')
+    if (active) active.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' })
+  }, [view])
+  return (
+    <div className="fin-nav" ref={scrollRef}>
+      {FIN_VIEWS.map(v => (
+        <button
+          key={v.id}
+          className={`fin-nav-btn${view === v.id ? ' fin-nav-btn--active' : ''}`}
+          onClick={() => onView(v.id)}
+        >
+          {v.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+// ── Donut Chart ───────────────────────────────────────────────────────────────
+
+function DonutChart({ pct, size = 140, color1 = '#00e5ff', color2 = '#9d65ff', centerLabel }) {
+  const cx = size / 2, cy = size / 2
+  const r = size / 2 - size * 0.07
+  const strokeW = r * 0.36
+  const circum = 2 * Math.PI * r
+  const safePct = Math.min(Math.max(pct || 0, 0), 100)
+  const filled = (safePct / 100) * circum
+
+  // Dot position at end of fill arc
+  const endAngle = (safePct / 100) * 360 - 90
+  const dotX = cx + r * Math.cos(endAngle * Math.PI / 180)
+  const dotY = cy + r * Math.sin(endAngle * Math.PI / 180)
+
+  return (
+    <div className="fin-donut-wrap" style={{ width: size, height: size }}>
+      <svg width={size} height={size} style={{ transform: 'rotate(-90deg)' }}>
+        <defs>
+          <linearGradient id={`dg-${size}`} x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor={color1} />
+            <stop offset="100%" stopColor={color2} />
+          </linearGradient>
+        </defs>
+        <circle cx={cx} cy={cy} r={r} fill="none"
+          stroke="rgba(255,255,255,0.06)" strokeWidth={strokeW} />
+        {safePct > 0 && (
+          <circle cx={cx} cy={cy} r={r} fill="none"
+            stroke={`url(#dg-${size})`} strokeWidth={strokeW}
+            strokeDasharray={`${filled} ${circum - filled}`}
+            strokeLinecap="round" />
+        )}
+        {safePct > 2 && safePct < 98 && (
+          <circle cx={dotX} cy={dotY} r={size * 0.04} fill="#fff"
+            style={{ filter: 'drop-shadow(0 0 4px rgba(255,255,255,0.8))' }} />
+        )}
+      </svg>
+      <div className="fin-donut-center">
+        <span className="fin-donut-pct">{Math.round(safePct)}%</span>
+        {centerLabel && <span className="fin-donut-label">{centerLabel}</span>}
+      </div>
+    </div>
+  )
+}
+
+// ── Ratio Donut (Income vs Expenses) ─────────────────────────────────────────
+
+function RatioDonut({ income, expenses, size = 120 }) {
+  const total = income + expenses
+  const incomePct = total > 0 ? (income / total) * 100 : 50
+  const cx = size / 2, cy = size / 2
+  const r = size / 2 - size * 0.07
+  const strokeW = r * 0.38
+  const circum = 2 * Math.PI * r
+  const incomeFill = (incomePct / 100) * circum
+
+  return (
+    <div style={{ position: 'relative', width: size, height: size }}>
+      <svg width={size} height={size} style={{ transform: 'rotate(-90deg)' }}>
+        <circle cx={cx} cy={cy} r={r} fill="none" stroke="#ff3864" strokeWidth={strokeW} />
+        <circle cx={cx} cy={cy} r={r} fill="none" stroke="#00e5ff" strokeWidth={strokeW}
+          strokeDasharray={`${incomeFill} ${circum - incomeFill}`} />
+        <circle
+          cx={cx + r * Math.cos((incomePct / 100 * 360 - 90) * Math.PI / 180)}
+          cy={cy + r * Math.sin((incomePct / 100 * 360 - 90) * Math.PI / 180)}
+          r={size * 0.04} fill="#fff" />
+      </svg>
+      <div className="fin-donut-center">
+        <span className="fin-donut-pct" style={{ fontSize: size * 0.15 }}>{Math.round(incomePct)}%</span>
+      </div>
+    </div>
+  )
+}
+
+// ── Monthly Bar + Line Chart ──────────────────────────────────────────────────
+
+function MonthlyBarChart({ yearData, selectedMonth }) {
+  const now = new Date()
+  const months = []
+  for (let m = 0; m <= now.getMonth(); m++) {
+    months.push(`${now.getFullYear()}-${String(m + 1).padStart(2, '0')}`)
+  }
+
+  const incomes  = months.map(m => yearData[m]?.income   || 0)
+  const expenses = months.map(m => yearData[m]?.expenses || 0)
+  const maxVal   = Math.max(...incomes, ...expenses, 1)
+
+  const W = 300, H = 120
+  const gap = W / months.length
+  const bW  = Math.max(5, gap * 0.32)
+
+  const expPoints = months.map((m, i) => {
+    const x = gap * i + gap / 2
+    const y = H - (expenses[i] / maxVal) * (H - 12)
+    return `${x.toFixed(1)},${y.toFixed(1)}`
+  }).join(' ')
+
+  return (
+    <div className="fin-monthly-chart">
+      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none"
+        style={{ width: '100%', height: '110px', display: 'block' }}>
+        {months.map((m, i) => {
+          const x    = gap * i + gap / 2
+          const iH   = (incomes[i]  / maxVal) * (H - 12)
+          const eH   = (expenses[i] / maxVal) * (H - 12)
+          const isSel = m === selectedMonth
+          return (
+            <g key={m}>
+              <rect x={x - bW - 1} y={H - iH} width={bW} height={Math.max(iH, 1)}
+                fill={isSel ? '#00e5ff' : 'rgba(0,229,255,0.35)'} rx={2} />
+              <rect x={x + 1} y={H - eH} width={bW} height={Math.max(eH, 1)}
+                fill={isSel ? '#9d65ff' : 'rgba(157,101,255,0.3)'} rx={2} />
+            </g>
+          )
+        })}
+        {/* Trend line (expenses) */}
+        <polyline points={expPoints} fill="none" stroke="#e054a4"
+          strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" />
+        {months.map((m, i) => {
+          if (!expenses[i]) return null
+          const x = gap * i + gap / 2
+          const y = H - (expenses[i] / maxVal) * (H - 12)
+          return <circle key={m} cx={x} cy={y} r={2.5} fill="#e054a4" />
+        })}
+      </svg>
+      <div className="fin-monthly-chart-axis">
+        {months.map((m, i) => (
+          <span key={m} style={{ color: m === selectedMonth ? 'var(--accent)' : undefined }}>
+            {MONTH_NAMES[parseInt(m.split('-')[1]) - 1]}
+          </span>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// ── Horizontal Bar Chart ──────────────────────────────────────────────────────
+
+function HorizBarChart({ items, colorFn }) {
+  const max = Math.max(...items.map(i => i.value), 1)
+  const GRAD = ['#9d65ff','#7c5cbf','#5c9be0','#4a9ef5','#00d4aa','#e054a4','#ff6b6b','#f0a500','#00e5ff','#00ff9d']
+  return (
+    <div className="fin-horiz-chart">
+      {items.map((item, i) => (
+        <div key={item.label} className="fin-horiz-row">
+          <span className="fin-horiz-label">{item.label}</span>
+          <div className="fin-horiz-track">
+            <div className="fin-horiz-fill"
+              style={{
+                width: `${(item.value / max) * 100}%`,
+                background: colorFn ? colorFn(i) : (item.color || GRAD[i % GRAD.length]),
+              }} />
+          </div>
+          <span className="fin-horiz-amt">{Math.round(item.value).toLocaleString()}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// ── Credit Card Widget ────────────────────────────────────────────────────────
+
+function CreditCardWidget({ cashTotal }) {
+  return (
+    <div className="fin-cc-widget">
+      <div className="fin-cc-visual">
+        <div className="fin-cc-visual-top">
+          <span className="fin-cc-chip-icon">▣</span>
+          <span className="fin-cc-icons">☾ ☀ )))</span>
+        </div>
+        <div className="fin-cc-num">•••• •••• •••• ••••</div>
+      </div>
+      <div className="fin-cc-bal-row">
+        <span className="fin-cc-bal-label">Balance:</span>
+        <span className="fin-cc-bal-val">{fmtUSD(cashTotal || 0)}</span>
+      </div>
+    </div>
+  )
+}
+
+// ── Summary List ──────────────────────────────────────────────────────────────
+
+function SummaryList({ summary, onView }) {
+  const items = [
+    { id: 'cash',        icon: '🏦', label: 'Cash',        val: summary?.cash?.total        || 0, color: '#00e5ff', positive: true },
+    { id: 'credit',      icon: '💳', label: 'Credit Owed', val: summary?.credit?.total       || 0, color: '#ff3864', positive: false },
+    { id: 'investments', icon: '📈', label: 'Investments', val: summary?.investments?.total  || 0, color: '#00ff9d', positive: true },
+    { id: 'budgeting',   icon: '💸', label: 'Spending',    val: summary?.spending?.expenses  || 0, color: '#ff2d78', positive: false },
+  ]
+  return (
+    <div className="fin-sum-list">
+      {items.map(item => (
+        <button key={item.id} className="fin-sum-item" onClick={() => onView(item.id)}>
+          <div className="fin-si-icon" style={{ background: `${item.color}1a`, borderColor: `${item.color}40` }}>
+            <span>{item.icon}</span>
+          </div>
+          <div className="fin-si-info">
+            <span className="fin-si-label">{item.label}</span>
+            <span className="fin-si-value" style={{ color: item.positive ? '#fff' : '#e054a4' }}>
+              {fmtUSD(item.val)}
+            </span>
+          </div>
+          <span className="fin-si-arrow">›</span>
+        </button>
+      ))}
+    </div>
+  )
+}
+
+// ── Dashboard View (Image 1) ──────────────────────────────────────────────────
+
+function FinDashboardView({ summary, transactions, yearData, month, onView }) {
+  const income   = computeIncomeStats(transactions).total
+  const expenses = computeSpendStats(transactions).total
+  const budget   = parseFloat(localStorage.getItem('aaron_spending_budget') || '0')
+  const pctUsed  = budget > 0 ? Math.min((expenses / budget) * 100, 100) : 0
+
+  const totalFlow  = income + expenses
+  const incomePct  = totalFlow > 0 ? Math.round((income  / totalFlow) * 100) : 50
+
+  return (
+    <div className="fin-dashboard">
+
+      {/* Income / Expense bar chart card */}
+      <div className="fin-dash-card">
+        <div className="fin-dash-ie-header">
+          <span className="fin-dash-income-lbl">
+            Income <span className="fin-dash-income-val">{fmtUSD(income)}</span>
+          </span>
+          <span className="fin-dash-expense-lbl">
+            Expenses <span className="fin-dash-expense-val">{fmtUSD(expenses)}</span>
+          </span>
+        </div>
+        <MonthlyBarChart yearData={yearData} selectedMonth={month} />
+      </div>
+
+      {/* Ratio donut + Credit card */}
+      <div className="fin-dash-row2">
+        <div className="fin-dash-card fin-dash-ratio">
+          <div className="fin-dash-card-title">Ratio Income</div>
+          <div style={{ display:'flex', justifyContent:'center', margin:'8px 0' }}>
+            <RatioDonut income={income} expenses={expenses} size={110} />
+          </div>
+          <div className="fin-ratio-legend">
+            <span className="fin-ratio-dot" style={{ background:'var(--accent)' }} />
+            <span>Income</span>
+            <span className="fin-ratio-dot" style={{ background:'var(--red)', marginLeft:10 }} />
+            <span>Expenses</span>
+          </div>
+        </div>
+
+        <div className="fin-dash-card fin-dash-cc">
+          <CreditCardWidget cashTotal={summary?.cash?.total} />
+        </div>
+      </div>
+
+      {/* Budget donut + Investments mini */}
+      <div className="fin-dash-row2">
+        <div className="fin-dash-card fin-dash-budget" onClick={() => onView('budgeting')} style={{ cursor:'pointer' }}>
+          <div className="fin-dash-card-title">Budget</div>
+          <div style={{ display:'flex', justifyContent:'center', margin:'6px 0' }}>
+            {budget > 0
+              ? <DonutChart pct={pctUsed} size={90} centerLabel="Used" />
+              : <div className="fin-dash-no-budget">Tap to set budget</div>
+            }
+          </div>
+          {budget > 0 && (
+            <div style={{ textAlign:'center', fontSize:11, color:'var(--text-muted)' }}>
+              {fmtUSD(expenses)} / {fmtUSD(budget)}
+            </div>
+          )}
+        </div>
+
+        <div className="fin-dash-card fin-dash-invest" onClick={() => onView('investments')} style={{ cursor:'pointer' }}>
+          <div className="fin-dash-card-title">Investments</div>
+          <div className="fin-dash-invest-val">{fmtUSD(summary?.investments?.total || 0)}</div>
+          <div style={{ fontSize:11, color:'var(--text-muted)', marginTop:4 }}>
+            {summary?.investments?.accounts?.length || 0} accounts
+          </div>
+        </div>
+      </div>
+
+      {/* Summary list */}
+      <div className="fin-dash-card">
+        <SummaryList summary={summary} onView={onView} />
+      </div>
+    </div>
+  )
+}
+
+// ── Budgeting View (new design, cyberpunk theme) ──────────────────────────────
+
+function FinBudgetingView({ transactions, lastMonthTransactions = [], month, yearData, onTxCategoryChange }) {
+  const [budget, setBudget]         = useState(() => parseFloat(localStorage.getItem('aaron_spending_budget') || '0'))
+  const [editMode, setEditMode]     = useState(false)
+  const [budgetInput, setBudgetInput] = useState('')
+  const [showTx, setShowTx]         = useState(false)
+
+  const saveBudget = (v) => {
+    const n = parseFloat(v)
+    const val = (!isNaN(n) && n > 0) ? n : 0
+    setBudget(val)
+    localStorage.setItem('aaron_spending_budget', String(val))
+    setEditMode(false)
+  }
+
+  const stats   = computeSpendStats(transactions)
+  const incStat = computeIncomeStats(transactions)
+  const expenses = stats.total
+  const income   = incStat.total
+
+  const totalFlow  = income + expenses
+  const incomePct  = totalFlow > 0 ? Math.round((income  / totalFlow) * 100) : 0
+  const expensePct = totalFlow > 0 ? Math.round((expenses / totalFlow) * 100) : 0
+  const pctBudget  = budget > 0 ? Math.min((expenses / budget) * 100, 100) : expensePct
+
+  const FIXED_EXP = new Set(['bills', 'transport'])
+  const VAR_EXP   = new Set(['food', 'shopping', 'entertainment', 'care'])
+  let fixedAmt = 0, varAmt = 0, otherAmt = 0
+  for (const tx of stats.transactions) {
+    const a = Math.abs(parseFloat(tx.amount))
+    if (FIXED_EXP.has(tx.category)) fixedAmt += a
+    else if (VAR_EXP.has(tx.category)) varAmt += a
+    else otherAmt += a
+  }
+
+  const catSorted  = Object.entries(stats.byCategory).sort((a, b) => b[1].total - a[1].total)
+  const excludedTx = transactions.filter(isExcluded).sort((a, b) => (b.date || '').localeCompare(a.date || ''))
+
+  return (
+    <div className="fin-budget-view">
+
+      {/* Donut + breakdown table */}
+      <div className="fin-dash-card fin-budget-top">
+        <div className="fin-budget-donut-col">
+          <DonutChart pct={pctBudget} size={150} centerLabel={budget > 0 ? 'Used Budget' : 'Expenses'} />
+          <div style={{ textAlign:'center', fontSize:11, color:'var(--text-muted)', marginTop:6 }}>
+            {fmtUSD(expenses)} spent
+          </div>
+        </div>
+
+        <div className="fin-budget-table">
+          <div className="fin-bb-head fin-bb-income">
+            <span>Income</span>
+            <span>{fmtUSD(income)}</span>
+            <span>{incomePct}%</span>
+          </div>
+          <div className="fin-bb-row">
+            <span>Fixed Income</span>
+            <span>{fmtUSD(income)}</span>
+            <span>{incomePct}%</span>
+          </div>
+
+          <div style={{ height:10 }} />
+
+          <div className="fin-bb-head fin-bb-expense">
+            <span>Expenses</span>
+            <span>{fmtUSD(expenses)}</span>
+            <span>{expensePct}%</span>
+          </div>
+          <div className="fin-bb-row">
+            <span>Non-Fixed</span>
+            <span>{fmtUSD(varAmt)}</span>
+            <span>{expenses > 0 ? Math.round((varAmt / expenses) * 100) : 0}%</span>
+          </div>
+          <div className="fin-bb-row">
+            <span>Fixed Costs</span>
+            <span>{fmtUSD(fixedAmt)}</span>
+            <span>{expenses > 0 ? Math.round((fixedAmt / expenses) * 100) : 0}%</span>
+          </div>
+          <div className="fin-bb-row">
+            <span>Other</span>
+            <span>{fmtUSD(otherAmt)}</span>
+            <span>{expenses > 0 ? Math.round((otherAmt / expenses) * 100) : 0}%</span>
+          </div>
+
+          {editMode ? (
+            <div className="fin-sa-budget-edit-row" style={{ marginTop:10 }}>
+              <input className="fin-budget-input" type="number" placeholder="e.g. 3000"
+                value={budgetInput} autoFocus
+                onChange={e => setBudgetInput(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && saveBudget(budgetInput)} />
+              <button className="fin-budget-save-btn" onClick={() => saveBudget(budgetInput)}>Save</button>
+              <button className="fin-budget-edit-btn" onClick={() => setEditMode(false)}>✕</button>
+            </div>
+          ) : (
+            <button className="fin-sa-set-budget-btn" style={{ marginTop:10, width:'100%', fontSize:11 }}
+              onClick={() => { setBudgetInput(budget ? String(budget) : ''); setEditMode(true) }}>
+              {budget > 0 ? `Budget: ${fmtUSD(budget)} · Edit` : '+ Set Monthly Budget'}
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Monthly trend */}
+      <div className="fin-dash-card">
+        <div className="fin-dash-card-title">Monthly Trend</div>
+        <MonthlyBarChart yearData={yearData} selectedMonth={month} />
+        <div className="fin-chart-legend">
+          <span className="fin-legend-dot" style={{ background:'var(--accent)' }} /> Income
+          <span className="fin-legend-dot" style={{ background:'#9d65ff', marginLeft:12 }} /> Expenses
+          <span className="fin-legend-line" /> Trend
+        </div>
+      </div>
+
+      {/* Category breakdown */}
+      {catSorted.length > 0 && (
+        <div className="fin-dash-card">
+          <div className="fin-dash-card-title">Category Breakdown</div>
+          <div className="fin-pie-layout">
+            <SpendingPieChart size={80}
+              segments={catSorted.map(([cat, { total }]) => ({
+                pct: expenses > 0 ? (total / expenses) * 100 : 0,
+                color: CATEGORY_MAP[cat]?.color || '#888',
+              }))}
+            />
+            <div className="fin-pie-legend">
+              {catSorted.map(([cat, { total }]) => {
+                const info = CATEGORY_MAP[cat]
+                const pct  = expenses > 0 ? (total / expenses) * 100 : 0
+                return (
+                  <div key={cat} className="fin-pie-legend-row">
+                    <div className="fin-pie-dot" style={{ background: info?.color || '#888' }} />
+                    <span className="fin-pie-cat">{info?.label || cat}</span>
+                    <span className="fin-pie-pct">{pct.toFixed(0)}%</span>
+                    <span className="fin-pie-amt">{fmtUSD(total)}</span>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Transfers (collapsible) */}
+      {excludedTx.length > 0 && (
+        <div className="fin-dash-card">
+          <button className="fin-transfers-toggle section-title"
+            style={{ background:'none', border:'none', width:'100%', textAlign:'left', cursor:'pointer', display:'flex', gap:8 }}
+            onClick={() => setShowTx(t => !t)}>
+            Transfers &amp; Excluded
+            <span className="fin-transfers-count">{excludedTx.length}</span>
+            <span className="fin-transfers-chevron">{showTx ? '∨' : '›'}</span>
+          </button>
+          {showTx && (
+            <div className="card-list" style={{ marginTop:8 }}>
+              {excludedTx.slice(0, 25).map((tx, i) => (
+                <TxRow key={tx.transaction_id || tx.id || i} tx={tx} onCategoryChange={onTxCategoryChange} />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Expenses View (Image 3) ───────────────────────────────────────────────────
+
+function FinExpensesView({ transactions }) {
+  const stats = computeSpendStats(transactions)
+  const expenses = stats.total
+
+  const catItems = Object.entries(stats.byCategory)
+    .sort((a, b) => b[1].total - a[1].total)
+    .map(([cat, { total }]) => ({
+      label: CATEGORY_MAP[cat]?.label || cat,
+      value: total,
+      color: CATEGORY_MAP[cat]?.color || '#888',
+    }))
+
+  // Fixed vs variable split
+  const FIXED = new Set(['bills', 'transport'])
+  const VAR   = new Set(['food', 'shopping', 'entertainment', 'care'])
+
+  const fixedItems = Object.entries(stats.byCategory)
+    .filter(([cat]) => FIXED.has(cat))
+    .sort((a, b) => b[1].total - a[1].total)
+    .map(([cat, { total }]) => ({ label: CATEGORY_MAP[cat]?.label || cat, value: total, color: CATEGORY_MAP[cat]?.color }))
+
+  const varItems = Object.entries(stats.byCategory)
+    .filter(([cat]) => VAR.has(cat))
+    .sort((a, b) => b[1].total - a[1].total)
+    .map(([cat, { total }]) => ({ label: CATEGORY_MAP[cat]?.label || cat, value: total, color: CATEGORY_MAP[cat]?.color }))
+
+  // Top merchants
+  const byMerchant = {}
+  for (const tx of stats.transactions) {
+    const key = normalizeMerchant(tx.description || tx.name)
+    if (!byMerchant[key]) byMerchant[key] = { total: 0, cat: tx.category }
+    byMerchant[key].total += Math.abs(parseFloat(tx.amount))
+  }
+  const merchantItems = Object.entries(byMerchant)
+    .sort((a, b) => b[1].total - a[1].total)
+    .slice(0, 12)
+    .map(([label, { total }]) => ({ label, value: total }))
+
+  const GRAD = ['#9d65ff','#7c5cbf','#5c9be0','#4a9ef5','#00d4aa','#e054a4','#ff6b6b','#f0a500','#00e5ff','#00ff9d','#a855f7','#10b981']
+  const gradFn = i => GRAD[i % GRAD.length]
+
+  if (catItems.length === 0) {
+    return <div className="empty-state">No spending data for this month.</div>
+  }
+
+  return (
+    <div className="fin-expenses-view">
+
+      {/* All categories */}
+      <div className="fin-dash-card">
+        <div className="fin-dash-card-title">Spending by Category</div>
+        <HorizBarChart items={catItems} colorFn={gradFn} />
+      </div>
+
+      {/* Fixed vs Variable split */}
+      <div className="fin-dash-row2">
+        {fixedItems.length > 0 && (
+          <div className="fin-dash-card">
+            <div className="fin-dash-card-title">Fixed Costs</div>
+            <HorizBarChart items={fixedItems} colorFn={gradFn} />
+          </div>
+        )}
+        {varItems.length > 0 && (
+          <div className="fin-dash-card">
+            <div className="fin-dash-card-title">Variable</div>
+            <HorizBarChart items={varItems} colorFn={gradFn} />
+          </div>
+        )}
+      </div>
+
+      {/* Top merchants */}
+      {merchantItems.length > 0 && (
+        <div className="fin-dash-card">
+          <div className="fin-dash-card-title">Top Merchants</div>
+          <HorizBarChart items={merchantItems} colorFn={gradFn} />
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Legacy SpendingDetail (kept for back-compat route) ────────────────────────
+
+function SpendingDetail({ summary, transactions, lastMonthTransactions = [], month, setMonth, onTxCategoryChange, onBack }) {
+  const [budget, setBudget]             = useState(() => parseFloat(localStorage.getItem('aaron_spending_budget') || '0'))
   const [budgetEditMode, setBudgetEditMode] = useState(false)
-  const [budgetInput, setBudgetInput]       = useState('')
-  const [showTransfers, setShowTransfers]   = useState(false)
+  const [budgetInput, setBudgetInput]   = useState('')
+  const [showTransfers, setShowTransfers] = useState(false)
 
   const saveBudget = (v) => {
     const n = parseFloat(v)
@@ -951,38 +1656,6 @@ function SpendingDetail({ summary, transactions, lastMonthTransactions = [], mon
     setBudgetEditMode(false)
   }
 
-  // ── Subscription review state ──────────────────────────────────────────────
-  const [subChoices, setSubChoices] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('aaron_sub_choices') || '{}') }
-    catch { return {} }
-  })
-
-  useEffect(() => {
-    if (!supabase) return
-    sb(supabase.from('subscription_choices').select('merchant, choice'))
-      .then(({ data } = {}) => {
-        const remote = Object.fromEntries((data || []).map(r => [r.merchant, r.choice]))
-        setSubChoices(prev => {
-          const toUpload = Object.entries(prev)
-            .filter(([merchant]) => !remote[merchant])
-            .map(([merchant, choice]) => ({ merchant, choice }))
-          if (toUpload.length) sb(supabase.from('subscription_choices').upsert(toUpload))
-          const merged = { ...prev, ...remote }
-          localStorage.setItem('aaron_sub_choices', JSON.stringify(merged))
-          return merged
-        })
-      })
-  }, []) // eslint-disable-line
-
-  const saveChoice = (merchant, choice) => {
-    const next = { ...subChoices, [merchant]: choice }
-    setSubChoices(next)
-    localStorage.setItem('aaron_sub_choices', JSON.stringify(next))
-    if (supabase) sb(supabase.from('subscription_choices').upsert({ merchant, choice }))
-  }
-  const confirmedSubs = subscriptions.filter(s => subChoices[s.merchant] === 'yes')
-  const pendingSubs   = subscriptions.filter(s => !subChoices[s.merchant])
-
   // ── Date math ──────────────────────────────────────────────────────────────
   const now = new Date()
   const [yr, mo] = month.split('-').map(Number)
@@ -991,7 +1664,7 @@ function SpendingDetail({ summary, transactions, lastMonthTransactions = [], mon
   const daysElapsed = isCurrentMonth ? now.getDate() : daysInMonth
   const daysLeft    = isCurrentMonth ? daysInMonth - now.getDate() : 0
 
-  // ── Core spending stats (real spending only — excludes transfers, investing) ─
+  // ── Core stats ─────────────────────────────────────────────────────────────
   const stats      = computeSpendStats(transactions)
   const spentSoFar = stats.total
   const txCount    = stats.txCount
@@ -999,43 +1672,38 @@ function SpendingDetail({ summary, transactions, lastMonthTransactions = [], mon
   const dailyRate  = daysElapsed > 0 ? spentSoFar / daysElapsed : 0
   const projected  = isCurrentMonth ? dailyRate * daysInMonth : spentSoFar
 
-  // ── Category breakdown ─────────────────────────────────────────────────────
-  const catSorted = Object.entries(stats.byCategory).sort((a, b) => b[1].total - a[1].total)
-  const topCatId  = catSorted[0]?.[0]
-  const topCatInfo = CATEGORY_MAP[topCatId] || CATEGORY_MAP['other']
-
   // ── Budget ─────────────────────────────────────────────────────────────────
   const remaining   = budget > 0 ? budget - spentSoFar : null
   const overBudget  = remaining !== null && remaining < 0
   const pctOfBudget = budget > 0 ? Math.min((spentSoFar / budget) * 100, 120) : 0
-  const onTrack     = budget > 0 && isCurrentMonth ? projected <= budget : null
 
-  // ── Fixed vs Variable ─────────────────────────────────────────────────────
-  const fixedTotal = stats.transactions.filter(tx => tx.category === 'bills')
-    .reduce((s, t) => s + Math.abs(parseFloat(t.amount)), 0)
-  const varTotal   = stats.transactions.filter(tx => tx.category !== 'bills')
-    .reduce((s, t) => s + Math.abs(parseFloat(t.amount)), 0)
+  // ── Category breakdown ─────────────────────────────────────────────────────
+  const catSorted = Object.entries(stats.byCategory).sort((a, b) => b[1].total - a[1].total)
 
-  // ── Large transactions (>2× avg, min $50 floor) ────────────────────────────
+  // ── Daily spend chart ──────────────────────────────────────────────────────
+  const dailyTotals = {}
+  for (const tx of stats.transactions) {
+    const day = tx.date ? parseInt(tx.date.split('-')[2], 10) : null
+    if (!day) continue
+    dailyTotals[day] = (dailyTotals[day] || 0) + Math.abs(parseFloat(tx.amount))
+  }
+  const maxDay   = Math.max(...Object.values(dailyTotals), 1)
+  // Always show full month so bars stay thin — future days just have no fill
+  const chartDays = Array.from({ length: daysInMonth }, (_, i) => i + 1)
+
+  // ── Large transactions ─────────────────────────────────────────────────────
   const threshold = Math.max(avgTx * 2, 50)
   const largeTx   = stats.transactions
     .filter(tx => Math.abs(parseFloat(tx.amount)) > threshold)
     .sort((a, b) => Math.abs(parseFloat(b.amount)) - Math.abs(parseFloat(a.amount)))
+    .slice(0, 5)
 
-  // ── Month-over-month comparison ────────────────────────────────────────────
-  const lastStats   = computeSpendStats(lastMonthTransactions)
-  const monthDelta  = spentSoFar - lastStats.total
+  // ── Monthly comparison ─────────────────────────────────────────────────────
+  const lastStats  = computeSpendStats(lastMonthTransactions)
+  const monthDelta = spentSoFar - lastStats.total
+  const hasCompare = lastMonthTransactions.length > 0
 
-  // ── Transfers / excluded transactions ─────────────────────────────────────
-  const excludedTx = transactions
-    .filter(isExcluded)
-    .sort((a, b) => (b.date || '').localeCompare(a.date || ''))
-
-  // ── Cash flow (from summary — cash accounts only) ──────────────────────────
-  const sp     = summary?.spending
-  const income = sp?.income || 0
-
-  // ── Merchant grouping ──────────────────────────────────────────────────────
+  // ── Top merchants ──────────────────────────────────────────────────────────
   const byMerchant = {}
   for (const tx of stats.transactions) {
     const key = normalizeMerchant(tx.description || tx.name)
@@ -1043,162 +1711,105 @@ function SpendingDetail({ summary, transactions, lastMonthTransactions = [], mon
     byMerchant[key].total += Math.abs(parseFloat(tx.amount))
     byMerchant[key].count += 1
   }
-  const topMerchants = Object.entries(byMerchant)
-    .sort((a, b) => b[1].total - a[1].total)
-    .slice(0, 8)
+  const topMerchants = Object.entries(byMerchant).sort((a, b) => b[1].total - a[1].total).slice(0, 6)
 
-  // ── Spending by week ───────────────────────────────────────────────────────
-  const weekBuckets = [0, 0, 0, 0, 0]
-  for (const tx of stats.transactions) {
-    const day = tx.date ? parseInt(tx.date.split('-')[2], 10) : 1
-    const w   = Math.min(Math.floor((day - 1) / 7), 4)
-    weekBuckets[w] += Math.abs(parseFloat(tx.amount))
-  }
-  const weeks = []
-  for (let start = 1; start <= daysInMonth; start += 7) {
-    const end = Math.min(start + 6, daysInMonth)
-    const w   = Math.floor((start - 1) / 7)
-    if (weekBuckets[w] > 0 || !isCurrentMonth || start <= daysElapsed)
-      weeks.push({ label: `${mo}/${start}–${mo}/${end}`, total: weekBuckets[w] })
-  }
-  const maxWeek = Math.max(...weeks.map(w => w.total), 1)
+  // ── Transfers ─────────────────────────────────────────────────────────────
+  const excludedTx = transactions.filter(isExcluded).sort((a, b) => (b.date || '').localeCompare(a.date || ''))
 
   return (
     <div className="page">
       <div className="fin-detail-header">
         <button className="fin-back-btn" onClick={onBack}>‹ Back</button>
-        <h2 className="section-title">Spending Analysis</h2>
+        <h2 className="section-title">Spending</h2>
         <MonthSelector month={month} onChange={setMonth} />
       </div>
 
-      {/* ── 1. Top Summary Card ── */}
+      {/* ── 1. Hero summary card ── */}
       <section className="page-section">
-        <div className="card fin-spend-summary-card">
-          <div className="fin-spend-summary-top">
+        <div className="card fin-sa-hero">
+          <div className="fin-sa-hero-top">
             <div>
-              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4, letterSpacing: '0.05em' }}>SPENT THIS MONTH</div>
-              <div className="fin-spend-big-num">{fmtUSD(spentSoFar)}</div>
+              <div className="fin-sa-eyebrow">Spent This Month</div>
+              <div className="fin-sa-hero-num">{fmtUSD(spentSoFar)}</div>
             </div>
-            {onTrack !== null && (
-              <div className={`fin-spend-chip ${onTrack ? 'fin-spend-chip--green' : 'fin-spend-chip--red'}`}>
-                {onTrack ? '✓ On Track' : '⚠ Over Budget'}
-              </div>
+            {budget > 0 && !budgetEditMode && (
+              <button className="fin-sa-link-btn" onClick={() => { setBudgetInput(String(budget)); setBudgetEditMode(true) }}>
+                Edit Budget
+              </button>
             )}
           </div>
-          <div className="fin-spend-sub-row">
-            {isCurrentMonth && dailyRate > 0 && (
-              <span className="fin-spend-chip fin-spend-chip--muted">Proj. {fmtUSD(projected)}</span>
-            )}
-            {remaining !== null && (
-              <span className={`fin-spend-chip ${overBudget ? 'fin-spend-chip--red' : 'fin-spend-chip--green'}`}>
-                {overBudget ? `${fmtUSD(Math.abs(remaining))} over` : `${fmtUSD(remaining)} left`}
-              </span>
-            )}
-            {topCatInfo && spentSoFar > 0 && (
-              <span className="fin-spend-chip fin-spend-chip--muted">{topCatInfo.icon} {topCatInfo.label}</span>
-            )}
-            {isCurrentMonth && daysLeft > 0 && (
-              <span className="fin-spend-chip fin-spend-chip--muted">{daysLeft}d left</span>
-            )}
-          </div>
-        </div>
-      </section>
 
-      {/* ── 2. Quick Stats ── */}
-      <section className="page-section">
-        <div className="card fin-metrics-grid">
-          <div className="fin-metric">
-            <span className="fin-metric-value">{fmtUSD(dailyRate)}/d</span>
-            <span className="fin-metric-label">Burn Rate</span>
-          </div>
-          <div className="fin-metric-divider" />
-          <div className="fin-metric">
-            <span className="fin-metric-value">{txCount}</span>
-            <span className="fin-metric-label">Transactions</span>
-          </div>
-          <div className="fin-metric-divider" />
-          <div className="fin-metric">
-            <span className="fin-metric-value">{fmtUSD(avgTx)}</span>
-            <span className="fin-metric-label">Avg per Tx</span>
-          </div>
-        </div>
-      </section>
-
-      {/* ── 3. Budget ── */}
-      <section className="page-section">
-        {budgetEditMode ? (
-          <div className="card fin-budget-card">
-            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>Monthly spending budget</div>
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-              <input
-                className="fin-budget-input"
-                type="number"
-                placeholder="e.g. 3000"
-                value={budgetInput}
-                onChange={e => setBudgetInput(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && saveBudget(budgetInput)}
-                autoFocus
-              />
+          {budgetEditMode ? (
+            <div className="fin-sa-budget-edit-row">
+              <input className="fin-budget-input" type="number" placeholder="e.g. 3000" value={budgetInput}
+                onChange={e => setBudgetInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && saveBudget(budgetInput)} autoFocus />
               <button className="fin-budget-save-btn" onClick={() => saveBudget(budgetInput)}>Save</button>
               <button className="fin-budget-edit-btn" onClick={() => setBudgetEditMode(false)}>Cancel</button>
             </div>
-          </div>
-        ) : budget > 0 ? (
-          <>
-            <h2 className="section-title">Budget</h2>
-            <div className="card fin-budget-card">
-              <div className="fin-budget-bar-track">
-                <div className="fin-budget-bar-fill" style={{ width: `${Math.min(pctOfBudget, 100)}%`, background: overBudget ? 'var(--red)' : 'var(--accent)' }} />
+          ) : budget > 0 ? (
+            <>
+              <div className="fin-sa-budget-bar-track">
+                <div className="fin-sa-budget-bar-fill" style={{ width: `${Math.min(pctOfBudget, 100)}%`, background: overBudget ? 'var(--red)' : 'var(--accent)' }} />
               </div>
-              <div className="fin-budget-labels">
-                <span>{fmtUSD(spentSoFar)} of {fmtUSD(budget)}</span>
-                <span className={overBudget ? 'negative' : 'positive'}>{Math.round(pctOfBudget)}%</span>
+              <div className="fin-sa-hero-budget-row">
+                <span className="fin-sa-muted">Budget {fmtUSD(budget)}</span>
+                <span className={overBudget ? 'negative' : 'positive'}>
+                  {overBudget ? `${fmtUSD(Math.abs(remaining))} over` : `${fmtUSD(remaining)} left`}
+                </span>
               </div>
-              {overBudget && (
-                <div className="fin-budget-warning">Over budget by {fmtUSD(Math.abs(remaining))}</div>
-              )}
-              <button className="fin-budget-edit-btn" onClick={() => { setBudgetInput(String(budget)); setBudgetEditMode(true) }}>
-                Edit target
-              </button>
+            </>
+          ) : (
+            <button className="fin-sa-set-budget-btn" onClick={() => { setBudgetInput(''); setBudgetEditMode(true) }}>+ Set Monthly Budget</button>
+          )}
+
+          <div className="fin-sa-hero-stats">
+            <div className="fin-sa-hero-stat">
+              <span className="fin-sa-hero-stat-label">Burn Rate</span>
+              <span className="fin-sa-hero-stat-val">{fmtUSD(dailyRate)}/day</span>
             </div>
-          </>
-        ) : (
-          <button className="fin-budget-set-btn" onClick={() => { setBudgetInput(''); setBudgetEditMode(true) }}>
-            + Set monthly spending budget
-          </button>
-        )}
+            <div className="fin-sa-hero-stat">
+              <span className="fin-sa-hero-stat-label">Projected</span>
+              <span className="fin-sa-hero-stat-val">{fmtUSD(projected)}</span>
+            </div>
+            <div className="fin-sa-hero-stat">
+              <span className="fin-sa-hero-stat-label">Transactions</span>
+              <span className="fin-sa-hero-stat-val">{txCount}</span>
+            </div>
+            <div className="fin-sa-hero-stat">
+              <span className="fin-sa-hero-stat-label">Days Left</span>
+              <span className="fin-sa-hero-stat-val">{isCurrentMonth ? daysLeft : '—'}</span>
+            </div>
+          </div>
+        </div>
       </section>
 
-      {/* ── 4. Category Breakdown ── */}
+      {/* ── 2. Category Breakdown (pie + legend) ── */}
       {catSorted.length > 0 && (
         <section className="page-section">
-          <h2 className="section-title">Where Money Went</h2>
-          <div className="card spending-card">
-            <div className="spending-bars">
-              {catSorted.map(([cat, { total, count }]) => {
+          <h2 className="section-title">Category Breakdown</h2>
+          <div className="card fin-pie-card">
+            <SpendingPieChart
+              size={96}
+              segments={catSorted.map(([cat, { total }]) => ({
+                pct:   spentSoFar > 0 ? (total / spentSoFar) * 100 : 0,
+                color: CATEGORY_MAP[cat]?.color || '#888',
+              }))}
+            />
+            <div className="fin-pie-legend">
+              {catSorted.map(([cat, { total }]) => {
                 const info = CATEGORY_MAP[cat]
                 const pct  = spentSoFar > 0 ? (total / spentSoFar) * 100 : 0
                 return (
-                  <div key={cat} className="spending-row">
-                    <div className="spending-row-top">
-                      <div className="spending-cat">
-                        <span style={{ fontSize: 14 }}>{info?.icon || '💸'}</span>
-                        <span className="spending-cat-name">{info?.label || cat}</span>
-                        <span className="fin-tx-count">{count}×</span>
-                      </div>
-                      <div className="spending-cat-right">
-                        <span className="spending-pct">{Math.round(pct)}%</span>
-                        <span className="spending-amt">{fmtUSD(total)}</span>
-                      </div>
-                    </div>
-                    <div className="spending-track">
-                      <div className="spending-fill" style={{ width: `${pct}%`, background: info?.color || '#6a6a6a' }} />
-                    </div>
+                  <div key={cat} className="fin-pie-legend-row">
+                    <div className="fin-pie-dot" style={{ background: info?.color || '#888' }} />
+                    <span className="fin-pie-cat">{info?.label || cat}</span>
+                    <span className="fin-pie-pct">{pct.toFixed(0)}%</span>
+                    <span className="fin-pie-amt">{fmtUSD(total)}</span>
                   </div>
                 )
               })}
-              <div className="fin-cat-total-row">
-                <span>Total spending</span>
+              <div className="fin-pie-total-row">
+                <span>Total</span>
                 <span>{fmtUSD(spentSoFar)}</span>
               </div>
             </div>
@@ -1206,29 +1817,38 @@ function SpendingDetail({ summary, transactions, lastMonthTransactions = [], mon
         </section>
       )}
 
-      {/* ── 5. Fixed vs Variable ── */}
-      {spentSoFar > 0 && (
+      {/* ── 3. Daily Spend chart ── */}
+      {chartDays.length > 1 && spentSoFar > 0 && (
         <section className="page-section">
-          <h2 className="section-title">Fixed vs Variable</h2>
-          <div className="card fin-metrics-grid">
-            <div className="fin-metric">
-              <span className="fin-metric-value">{fmtUSD(fixedTotal)}</span>
-              <span className="fin-metric-label">🏠 Fixed (Bills)</span>
+          <h2 className="section-title">Daily Spend</h2>
+          <div className="card fin-daily-chart-card">
+            <div className="fin-daily-chart">
+              {chartDays.map(day => {
+                const amt = dailyTotals[day] || 0
+                const h   = amt > 0 ? Math.max((amt / maxDay) * 100, 4) : 0
+                return (
+                  <div key={day} className="fin-daily-bar-wrap" title={`${mo}/${day}: ${fmtUSD(amt)}`}>
+                    <div className="fin-daily-bar">
+                      <div className="fin-daily-bar-fill" style={{ height: `${h}%` }} />
+                    </div>
+                  </div>
+                )
+              })}
             </div>
-            <div className="fin-metric-divider" />
-            <div className="fin-metric">
-              <span className="fin-metric-value">{fmtUSD(varTotal)}</span>
-              <span className="fin-metric-label">💳 Variable</span>
+            <div className="fin-daily-axis">
+              <span>{mo}/1</span>
+              <span className="fin-sa-muted">Avg {fmtUSD(dailyRate)}/day</span>
+              <span>{mo}/{daysInMonth}</span>
             </div>
           </div>
         </section>
       )}
 
-      {/* ── 6. Large Transactions ── */}
+      {/* ── 4. Large Transactions ── */}
       {largeTx.length > 0 && (
         <section className="page-section">
           <h2 className="section-title">Large Transactions</h2>
-          <p className="fin-section-note">Larger than 2× your avg ({fmtUSD(avgTx)})</p>
+          <p className="fin-section-note">Above 2× your avg spend ({fmtUSD(avgTx)})</p>
           <div className="card-list">
             {largeTx.map((tx, i) => (
               <TxRow key={tx.transaction_id || tx.id || i} tx={tx} onCategoryChange={onTxCategoryChange} />
@@ -1237,90 +1857,71 @@ function SpendingDetail({ summary, transactions, lastMonthTransactions = [], mon
         </section>
       )}
 
-      {/* ── 7. Monthly Comparison ── */}
-      {lastMonthTransactions.length > 0 && (
+      {/* ── 5. Monthly Comparison ── */}
+      {hasCompare && (
         <section className="page-section">
           <h2 className="section-title">vs Last Month</h2>
-          <div className="card fin-compare-card">
-            <div className="fin-compare-row">
-              <span>{monthLabel(month)}</span>
-              <span style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtUSD(spentSoFar)}</span>
-            </div>
-            <div className="fin-compare-row" style={{ color: 'var(--text-muted)' }}>
-              <span>{monthLabel(prevMonthStr(month))}</span>
-              <span style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtUSD(lastStats.total)}</span>
-            </div>
-            <div className="fin-compare-delta-row">
-              <span>Change</span>
-              <span className={`fin-compare-cat-delta ${monthDelta >= 0 ? 'negative' : 'positive'}`}>
-                {monthDelta >= 0 ? '+' : ''}{fmtUSD(monthDelta)}
-              </span>
-            </div>
-            {(() => {
-              const allCats = new Set([...Object.keys(stats.byCategory), ...Object.keys(lastStats.byCategory)])
-              const catDeltas = [...allCats].map(cat => ({
-                cat,
-                delta: (stats.byCategory[cat]?.total || 0) - (lastStats.byCategory[cat]?.total || 0),
-              })).sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta)).slice(0, 5)
-              return (
-                <div className="fin-compare-cat-table">
-                  {catDeltas.map(({ cat, delta }) => {
-                    const info = CATEGORY_MAP[cat] || CATEGORY_MAP['other']
-                    return (
-                      <div key={cat} className="fin-compare-cat-row">
-                        <span>{info.icon} {info.label}</span>
-                        <span className={`fin-compare-cat-delta ${delta >= 0 ? 'negative' : 'positive'}`}>
-                          {delta >= 0 ? '+' : ''}{fmtUSD(delta)}
-                        </span>
+          <div className="card fin-sa-compare-card">
+            <div className="fin-sa-cmp-row">
+              <div className="fin-sa-cmp-month">
+                <span className="fin-sa-eyebrow">{monthLabel(prevMonthStr(month))}</span>
+                <span className="fin-sa-cmp-num">{fmtUSD(lastStats.total)}</span>
+              </div>
+              <div className="fin-sa-cmp-bars-v">
+                {[
+                  { val: lastStats.total, dim: true },
+                  { val: spentSoFar, dim: false },
+                ].map(({ val, dim }, i) => {
+                  const maxV = Math.max(lastStats.total, spentSoFar, 1)
+                  return (
+                    <div key={i} className="fin-sa-cmp-bar-v-wrap">
+                      <div className="fin-sa-cmp-bar-v-track">
+                        <div className="fin-sa-cmp-bar-v-fill" style={{ height: `${(val / maxV) * 100}%`, background: dim ? 'rgba(255,255,255,0.15)' : 'var(--accent)' }} />
                       </div>
-                    )
-                  })}
-                </div>
-              )
-            })()}
+                    </div>
+                  )
+                })}
+              </div>
+              <div className="fin-sa-cmp-month fin-sa-cmp-month--right">
+                <span className="fin-sa-eyebrow">{monthLabel(month)}</span>
+                <span className="fin-sa-cmp-num">{fmtUSD(spentSoFar)}</span>
+              </div>
+            </div>
+            <div className={`fin-sa-cmp-delta-row ${monthDelta >= 0 ? 'negative' : 'positive'}`}>
+              {monthDelta >= 0 ? '▲ ' : '▼ '}{fmtUSD(Math.abs(monthDelta))} {monthDelta >= 0 ? 'more than last month' : 'less than last month'}
+            </div>
           </div>
         </section>
       )}
 
-      {/* ── 8. Cash Flow ── */}
-      <section className="page-section">
-        <div className="card fin-cashflow-card">
-          <div className="fin-cf-title">Cash Flow</div>
-          <div className="fin-cf-row">
-            <span className="fin-cf-label">
-              {sp?.beginning_estimated ? 'Start Balance (est.)' : 'Start of Month'}
-            </span>
-            <span className="fin-cf-value">{fmtUSD(sp?.beginning_balance)}</span>
+      {/* ── 5. Top Merchants ── */}
+      {topMerchants.length > 0 && (
+        <section className="page-section">
+          <h2 className="section-title">Top Merchants</h2>
+          <div className="card" style={{ padding: '4px 0' }}>
+            {topMerchants.map(([merchant, { total, count, cat }], i) => {
+              const info = CATEGORY_MAP[cat]
+              return (
+                <div key={merchant} className="fin-merchant-row">
+                  <div className="fin-merchant-left">
+                    <span className="fin-merchant-rank">{i + 1}</span>
+                    <div className="fin-merchant-info">
+                      <span className="fin-merchant-name">{merchant}</span>
+                      <span className="fin-merchant-meta">{info?.icon} {info?.label || cat}{count > 1 && ` · ${count}×`}</span>
+                    </div>
+                  </div>
+                  <span className="fin-merchant-amt">{fmtUSD(total)}</span>
+                </div>
+              )
+            })}
           </div>
-          <div className="fin-cf-row">
-            <span className="fin-cf-label">+ Income</span>
-            <span className="fin-cf-value positive">+{fmtUSD(income)}</span>
-          </div>
-          <div className="fin-cf-row">
-            <span className="fin-cf-label">− Spending</span>
-            <span className="fin-cf-value negative">-{fmtUSD(spentSoFar)}</span>
-          </div>
-          {isCurrentMonth && dailyRate > 0 && (
-            <div className="fin-cf-row" style={{ opacity: 0.55 }}>
-              <span className="fin-cf-label">Projected total spend</span>
-              <span className="fin-cf-value negative">-{fmtUSD(projected)}</span>
-            </div>
-          )}
-          <div className="fin-cf-divider" />
-          <div className="fin-cf-row fin-cf-total">
-            <span className="fin-cf-label">Current Balance</span>
-            <span className="fin-cf-value">{fmtUSD(sp?.current_balance)}</span>
-          </div>
-        </div>
-      </section>
+        </section>
+      )}
 
-      {/* ── 9. Transfers & Excluded (collapsible) ── */}
+      {/* ── 6. Transfers (collapsible) ── */}
       {excludedTx.length > 0 && (
         <section className="page-section">
-          <h2
-            className="section-title fin-transfers-toggle"
-            onClick={() => setShowTransfers(t => !t)}
-          >
+          <h2 className="section-title fin-transfers-toggle" onClick={() => setShowTransfers(t => !t)}>
             Transfers & Excluded
             <span className="fin-transfers-count">{excludedTx.length}</span>
             <span className="fin-transfers-chevron">{showTransfers ? '∨' : '›'}</span>
@@ -1335,114 +1936,6 @@ function SpendingDetail({ summary, transactions, lastMonthTransactions = [], mon
               </div>
             </>
           )}
-        </section>
-      )}
-
-      {/* ── 10. Spending by Week ── */}
-      {weeks.length > 0 && (
-        <section className="page-section">
-          <h2 className="section-title">Spending by Week</h2>
-          <div className="card" style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {weeks.map((w, i) => (
-              <div key={i} className="fin-week-row">
-                <span className="fin-week-label">{w.label}</span>
-                <div className="fin-week-track">
-                  <div className="fin-week-fill" style={{ width: `${(w.total / maxWeek) * 100}%` }} />
-                </div>
-                <span className="fin-week-amt">{fmtUSD(w.total)}</span>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
-
-      {/* ── 11. Confirmed Subscriptions ── */}
-      {confirmedSubs.length > 0 && (
-        <section className="page-section">
-          <h2 className="section-title">Subscriptions</h2>
-          <div className="card" style={{ padding: '4px 0' }}>
-            {confirmedSubs.map((sub) => {
-              const cat   = CATEGORY_MAP[sub.category] || CATEGORY_MAP['other']
-              const isOld = !sub.chargedThisMonth
-              return (
-                <div key={sub.merchant} className="fin-sub-row">
-                  <div className="fin-sub-left">
-                    <span className="fin-sub-icon">{cat.icon}</span>
-                    <div className="fin-sub-info">
-                      <span className="fin-sub-name">{sub.merchant}</span>
-                      <span className="fin-sub-meta">
-                        {sub.frequency} · {sub.months} months
-                        {isOld && <span className="fin-sub-badge-inactive"> · not this month ⚠</span>}
-                      </span>
-                    </div>
-                  </div>
-                  <div className="fin-sub-right">
-                    <span className={`fin-sub-amt${isOld ? ' fin-sub-amt--inactive' : ''}`}>{fmtUSD(sub.amount)}</span>
-                    <span className="fin-sub-freq">/mo</span>
-                    <button className="fin-sub-remove" onClick={() => saveChoice(sub.merchant, 'no')} title="Remove">×</button>
-                  </div>
-                </div>
-              )
-            })}
-            <div className="fin-sub-total-row">
-              <span>Total per month</span>
-              <span>{fmtUSD(confirmedSubs.reduce((s, sub) => s + sub.amount, 0))}</span>
-            </div>
-          </div>
-        </section>
-      )}
-
-      {/* ── 12. Pending Subscription Review ── */}
-      {pendingSubs.length > 0 && (
-        <section className="page-section">
-          <h2 className="section-title">Recurring — Is This A Subscription?</h2>
-          <div className="card" style={{ padding: '4px 0' }}>
-            {pendingSubs.map((sub) => {
-              const cat = CATEGORY_MAP[sub.category] || CATEGORY_MAP['other']
-              return (
-                <div key={sub.merchant} className="fin-sub-review-row">
-                  <div className="fin-sub-left">
-                    <span className="fin-sub-icon">{cat.icon}</span>
-                    <div className="fin-sub-info">
-                      <span className="fin-sub-name">{sub.merchant}</span>
-                      <span className="fin-sub-meta">Charged {sub.count}× over {sub.months} months · {fmtUSD(sub.amount)}</span>
-                    </div>
-                  </div>
-                  <div className="fin-sub-review-btns">
-                    <button className="fin-sub-btn-yes" onClick={() => saveChoice(sub.merchant, 'yes')}>Yes</button>
-                    <button className="fin-sub-btn-no"  onClick={() => saveChoice(sub.merchant, 'no')}>No</button>
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        </section>
-      )}
-
-      {/* ── 13. Top Merchants ── */}
-      {topMerchants.length > 0 && (
-        <section className="page-section">
-          <h2 className="section-title">Top Merchants</h2>
-          <div className="card" style={{ padding: '4px 0' }}>
-            {topMerchants.map(([merchant, { total, count, cat }], i) => {
-              const info = CATEGORY_MAP[cat]
-              return (
-                <div key={merchant} className="fin-merchant-row">
-                  <div className="fin-merchant-left">
-                    <span className="fin-merchant-rank">{i + 1}</span>
-                    <div className="fin-merchant-info">
-                      <span className="fin-merchant-name">{merchant}</span>
-                      <span className="fin-merchant-meta">
-                        {info?.icon} {info?.label || cat}
-                        {count > 1 && ` · ${count}×`}
-                      </span>
-                    </div>
-                  </div>
-                  <span className="fin-merchant-amt">{fmtUSD(total)}</span>
-                </div>
-              )
-            })}
-          </div>
         </section>
       )}
     </div>
@@ -1629,15 +2122,56 @@ function ManageAccounts({ enrollments, onDisconnect, onDisconnectAll, investment
   )
 }
 
+// ── Spending Shell (chart views inside the Spent row) ────────────────────────
+
+function FinSpendingShell({ summary, transactions, lastMonthTransactions, month, setMonth, yearData, onTxCategoryChange, onBack }) {
+  const [spendView, setSpendView] = useState('dashboard')
+
+  return (
+    <div className="fin-shell">
+      <div className="fin-top-bar">
+        <button className="fin-back-btn" onClick={onBack}>‹ Back</button>
+        <MonthBar selectedMonth={month} onSelect={setMonth} />
+      </div>
+      <FinNav view={spendView} onView={setSpendView} />
+      <div className="fin-content">
+        {spendView === 'dashboard' && (
+          <FinDashboardView
+            summary={summary}
+            transactions={transactions}
+            yearData={yearData}
+            month={month}
+            onView={setSpendView}
+          />
+        )}
+        {spendView === 'budgeting' && (
+          <FinBudgetingView
+            transactions={transactions}
+            lastMonthTransactions={lastMonthTransactions}
+            month={month}
+            yearData={yearData}
+            onTxCategoryChange={onTxCategoryChange}
+          />
+        )}
+        {spendView === 'expenses' && (
+          <FinExpensesView transactions={transactions} />
+        )}
+      </div>
+    </div>
+  )
+}
+
 // ── Main Component ────────────────────────────────────────────────────────────
 
 export default function Finance() {
-  const data = useFinanceData()
-  const snap = useSnaptradeData()
-  const subs = useSubscriptions()
-  const [view,       setView]       = useState('dashboard') // dashboard | cash | credit | investments | spending | transactions | manage
-  const [toast,      setToast]      = useState(null)
-  const [addMenu, setAddMenu] = useState(false)  // + Add dropdown open
+  const data    = useFinanceData()
+  const snap    = useSnaptradeData()
+  useSubscriptions() // keep detection running
+  const yearData = useYearData()
+
+  const [view,     setView]     = useState('home')
+  const [toast,    setToast]    = useState(null)
+  const [addMenu,  setAddMenu]  = useState(false)
   const addMenuRef = useRef(null)
 
   useEffect(() => {
@@ -1647,39 +2181,18 @@ export default function Finance() {
     return () => document.removeEventListener('mousedown', handler)
   }, [addMenu])
 
-  const showToast = useCallback((message, type = 'success') => {
-    setToast({ message, type })
-  }, [])
+  const showToast = useCallback((msg, type = 'success') => setToast({ message: msg, type }), [])
 
   const { open: openTeller, ready: tellerReady } = useTellerConnect({
-    onSuccess: async (result) => {
-      await data.onTellerSuccess(result)
-      showToast('Account linked successfully!')
-    },
-    onError: (msg) => showToast(msg, 'error'),
+    onSuccess: async (result) => { await data.onTellerSuccess(result); showToast('Account linked!') },
+    onError:   (msg) => showToast(msg, 'error'),
   })
 
   const handleSync = async () => {
     try {
-      await Promise.allSettled([
-        data.sync(),
-        snap.afterConnect(data.load),
-      ])
+      await Promise.allSettled([data.sync(), snap.afterConnect(data.load)])
       showToast('Synced successfully!')
-    } catch (err) {
-      showToast(err.message, 'error')
-    }
-  }
-
-  const handleAddTeller = () => {
-    setAddMenu(false)
-    openTeller()
-  }
-
-  const handleAddInvestment = async () => {
-    setAddMenu(false)
-    await snap.connect()
-    showToast('After connecting, tap Sync to update your accounts.')
+    } catch (err) { showToast(err.message, 'error') }
   }
 
   const linked = data.enrollments.length > 0 || data.summary != null
@@ -1706,55 +2219,38 @@ export default function Finance() {
     )
   }
 
-  // ── Loading ──
-  // Only block the UI if we have no cached data. If we do, the background
-  // fetch will silently update the displayed values without a spinner.
   if (data.loading && !data.summary) {
     return <div className="page"><div className="fin-loading">Loading…</div></div>
   }
 
-  // ── Detail views ──
+  // ── Full-screen breakouts ──
+  if (view === 'manage') return (
+    <ManageAccounts enrollments={data.enrollments}
+      onDisconnect={data.disconnect} onDisconnectAll={data.disconnectAll}
+      investmentAccounts={data.summary?.investments?.accounts || []}
+      onDisconnectSnap={() => snap.disconnect(data.load)}
+      onBack={() => setView('home')} />
+  )
   if (view === 'cash') return (
-    <CashDetail
-      summary={data.summary}
-      transactions={data.transactions}
-      month={data.month}
-      setMonth={data.setMonth}
+    <CashDetail summary={data.summary} transactions={data.transactions}
+      month={data.month} setMonth={data.setMonth}
       onCategoryChange={data.updateAccountCategory}
       onTxCategoryChange={data.updateTransactionCategory}
-      onBack={() => setView('dashboard')}
-    />
+      onBack={() => setView('home')} />
   )
   if (view === 'credit') return (
-    <CreditDetail
-      summary={data.summary}
-      transactions={data.transactions}
-      month={data.month}
-      setMonth={data.setMonth}
+    <CreditDetail summary={data.summary} transactions={data.transactions}
+      month={data.month} setMonth={data.setMonth}
       onCategoryChange={data.updateAccountCategory}
       onTxCategoryChange={data.updateTransactionCategory}
-      onBack={() => setView('dashboard')}
-    />
+      onBack={() => setView('home')} />
   )
   if (view === 'investments') return (
     <InvestmentsDetail
       summary={data.summary}
       snap={snap}
       onReload={data.load}
-      onBack={() => setView('dashboard')}
-    />
-  )
-  if (view === 'spending') return (
-    <SpendingDetail
-      summary={data.summary}
-      transactions={data.transactions}
-      lastMonthTransactions={data.lastMonthTransactions}
-      month={data.month}
-      setMonth={data.setMonth}
-      onTxCategoryChange={data.updateTransactionCategory}
-      subscriptions={subs}
-      onBack={() => setView('dashboard')}
-    />
+      onBack={() => setView('home')} />
   )
   if (view === 'transactions') return (
     <AllTransactions
@@ -1763,61 +2259,52 @@ export default function Finance() {
       month={data.month}
       setMonth={data.setMonth}
       onTxCategoryChange={data.updateTransactionCategory}
-      onBack={() => setView('dashboard')}
-    />
+      onBack={() => setView('home')} />
   )
-  if (view === 'manage') return (
-    <ManageAccounts
-      enrollments={data.enrollments}
-      onDisconnect={data.disconnect}
-      onDisconnectAll={data.disconnectAll}
-      investmentAccounts={data.summary?.investments?.accounts || []}
-      onDisconnectSnap={() => snap.disconnect(data.load)}
-      onBack={() => setView('dashboard')}
-    />
+  if (view === 'spending') return (
+    <FinSpendingShell
+      summary={data.summary}
+      transactions={data.transactions}
+      lastMonthTransactions={data.lastMonthTransactions}
+      month={data.month}
+      setMonth={data.setMonth}
+      yearData={yearData}
+      onTxCategoryChange={data.updateTransactionCategory}
+      onBack={() => setView('home')} />
   )
 
-  // ── Dashboard ──
-  const sp = data.summary?.spending
-  const netWorth = (data.summary?.cash?.total || 0) +
-    (data.summary?.investments?.total || 0) -
-    (data.summary?.credit?.total || 0)
+  // ── Home dashboard ──
+  const netWorth = (data.summary?.cash?.total || 0)
+    - (data.summary?.credit?.total || 0)
+    + (data.summary?.investments?.total || 0)
+  const spendStats = computeSpendStats(data.transactions)
+  const txCount    = data.transactions.length
 
   return (
-    <div className="page">
+    <div className="fin-home">
       {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
 
       {/* Toolbar */}
       <div className="fin-toolbar">
+        <span className="fin-toolbar-title">Finance</span>
         <div className="fin-toolbar-actions">
-          <button className="action-btn" onClick={handleSync} disabled={data.syncing || snap.snapLoading}>
-            {data.syncing || snap.snapLoading ? 'Syncing…' : '↻ Sync'}
+          <button className="fin-icon-btn" onClick={handleSync}
+            disabled={data.syncing || snap.snapLoading} title="Sync">
+            {data.syncing || snap.snapLoading ? '⟳' : '↻'}
           </button>
           <div style={{ position: 'relative' }} ref={addMenuRef}>
-            <button className="action-btn" onClick={() => setAddMenu(m => !m)} disabled={!tellerReady}>+ Add</button>
+            <button className="fin-icon-btn" onClick={() => setAddMenu(m => !m)}
+              disabled={!tellerReady} title="Add account">+</button>
             {addMenu && (
-              <div style={{
-                position: 'absolute', top: '100%', left: 0, zIndex: 100, marginTop: 4,
-                background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8,
-                minWidth: 180, boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
-              }}>
-                <button onClick={handleAddTeller} style={{
-                  display: 'block', width: '100%', padding: '10px 16px', textAlign: 'left',
-                  background: 'none', border: 'none', color: 'var(--text)', fontSize: '14px', cursor: 'pointer',
-                }}>
-                  🏦 Bank / Credit Card
-                </button>
-                <button onClick={handleAddInvestment} style={{
-                  display: 'block', width: '100%', padding: '10px 16px', textAlign: 'left',
-                  background: 'none', border: 'none', color: 'var(--text)', fontSize: '14px', cursor: 'pointer',
-                  borderTop: '1px solid var(--border)',
-                }}>
+              <div className="fin-add-menu">
+                <button onClick={() => { setAddMenu(false); openTeller() }}>🏦 Bank / Credit Card</button>
+                <button onClick={() => { setAddMenu(false); snap.connect(); showToast('After connecting, tap Sync.') }}>
                   📈 Investment Account
                 </button>
               </div>
             )}
           </div>
-          <button className="action-btn" onClick={() => setView('manage')}>Manage</button>
+          <button className="fin-icon-btn" onClick={() => setView('manage')} title="Manage accounts">⚙</button>
         </div>
       </div>
 
@@ -1828,16 +2315,17 @@ export default function Finance() {
         </div>
       )}
 
-      {/* Net Worth hero */}
-      <section className="page-section">
+      <div className="fin-home-body">
+        {/* Net Worth Hero */}
         <div className="fin-nw-hero">
-          <span className="fin-nw-hero-label">Net Worth</span>
-          <span className="fin-nw-hero-value">{fmtUSD(netWorth)}</span>
+          <div className="fin-nw-hero-label">Net Worth</div>
+          <div className="fin-nw-hero-value">{fmtUSD(netWorth)}</div>
+          <div className="fin-nw-hero-sub">
+            {(data.summary?.cash?.accounts?.length || 0) + (data.summary?.credit?.accounts?.length || 0)} accounts connected
+          </div>
         </div>
-      </section>
 
-      {/* Summary rows */}
-      <section className="page-section">
+        {/* Summary rows */}
         <div className="fin-summary-list">
           <button className="fin-summary-row fin-summary-row--blue" onClick={() => setView('cash')}>
             <div className="fin-sr-left">
@@ -1848,7 +2336,7 @@ export default function Finance() {
               </div>
             </div>
             <div className="fin-sr-right">
-              <span className="fin-sr-value">{fmtUSD(data.summary?.cash?.total)}</span>
+              <span className="fin-sr-value">{fmtUSD(data.summary?.cash?.total || 0)}</span>
               <span className="fin-sr-arrow">›</span>
             </div>
           </button>
@@ -1862,7 +2350,7 @@ export default function Finance() {
               </div>
             </div>
             <div className="fin-sr-right">
-              <span className="fin-sr-value fin-sr-value--red">{fmtUSD(data.summary?.credit?.total)}</span>
+              <span className="fin-sr-value fin-sr-value--red">{fmtUSD(data.summary?.credit?.total || 0)}</span>
               <span className="fin-sr-arrow">›</span>
             </div>
           </button>
@@ -1872,7 +2360,7 @@ export default function Finance() {
               <span className="fin-sr-icon">📈</span>
               <div className="fin-sr-info">
                 <span className="fin-sr-label">Investments</span>
-                <span className="fin-sr-sub">{`${data.summary?.investments?.accounts?.length || 0} accounts`}</span>
+                <span className="fin-sr-sub">{data.summary?.investments?.accounts?.length || 0} accounts</span>
               </div>
             </div>
             <div className="fin-sr-right">
@@ -1886,21 +2374,21 @@ export default function Finance() {
               <span className="fin-sr-icon">💸</span>
               <div className="fin-sr-info">
                 <span className="fin-sr-label">Spent</span>
-                <span className="fin-sr-sub">{sp?.income ? `Income ${fmtUSD(sp.income)}` : 'This month'}</span>
+                <span className="fin-sr-sub">{spendStats.txCount} transactions this month</span>
               </div>
             </div>
             <div className="fin-sr-right">
-              <span className="fin-sr-value fin-sr-value--red">{fmtUSD(sp?.expenses)}</span>
+              <span className="fin-sr-value fin-sr-value--red">{fmtUSD(spendStats.total)}</span>
               <span className="fin-sr-arrow">›</span>
             </div>
           </button>
 
           <button className="fin-summary-row" onClick={() => setView('transactions')}>
             <div className="fin-sr-left">
-              <span className="fin-sr-icon">🧾</span>
+              <span className="fin-sr-icon">📋</span>
               <div className="fin-sr-info">
                 <span className="fin-sr-label">Transactions</span>
-                <span className="fin-sr-sub">{data.transactions.length} this month</span>
+                <span className="fin-sr-sub">{txCount} this month</span>
               </div>
             </div>
             <div className="fin-sr-right">
@@ -1908,7 +2396,7 @@ export default function Finance() {
             </div>
           </button>
         </div>
-      </section>
+      </div>
     </div>
   )
 }

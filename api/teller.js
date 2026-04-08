@@ -43,8 +43,10 @@ async function incrementalSync(supabase, creds) {
         availableBalance = parseFloat(bal.available ?? bal.ledger   ?? 0)
       }
 
-      const flipSign = (acc.type === 'credit' || acc.subtype === 'credit_card') &&
-                       acc.institution_name?.toLowerCase().includes('navy')
+      // Credit accounts: Teller returns positive=charge, negative=payment.
+      // Flip so our convention is negative=charge (red), positive=payment (green).
+      // Also check category_group in case Teller returns an unexpected type for some banks (e.g. Navy Fed).
+      const isCreditAcct = acc.type === 'credit' || acc.subtype === 'credit_card' || acc.category_group === 'credit'
       let txObjs = []
       if (txResult.status === 'fulfilled') {
         txObjs = txResult.value
@@ -54,7 +56,7 @@ async function incrementalSync(supabase, creds) {
             account_id:     tx.account_id,
             date:           tx.date,
             description:    tx.description,
-            amount:         flipSign ? -parseFloat(tx.amount) : parseFloat(tx.amount),
+            amount:         isCreditAcct ? -parseFloat(tx.amount) : parseFloat(tx.amount),
             category:       mapTellerCategory(tx.details?.category),
             pending:        tx.status === 'pending',
             is_transfer:    tx.details?.category?.toLowerCase().includes('transfer') || false,
@@ -151,8 +153,9 @@ async function fullSync(supabase, creds, preFetched = {}) {
             last_four: acc.last_four, institution_name, last_synced_at: new Date().toISOString(),
           }
 
-          const flipSign = (acc.type === 'credit' || acc.subtype === 'credit_card') &&
-                           institution_name?.toLowerCase().includes('navy')
+          // Credit accounts: Teller returns positive=charge, negative=payment.
+          // Also check category_group in case Teller returns an unexpected type for some banks (e.g. Navy Fed).
+          const isCreditAcct = acc.type === 'credit' || acc.subtype === 'credit_card' || category_group === 'credit'
           let txObjs = []
           if (txResult.status === 'fulfilled') {
             txObjs = txResult.value
@@ -160,7 +163,7 @@ async function fullSync(supabase, creds, preFetched = {}) {
               .map(tx => ({
                 transaction_id: tx.id, account_id: tx.account_id, date: tx.date,
                 description: tx.description,
-                amount: flipSign ? -parseFloat(tx.amount) : parseFloat(tx.amount),
+                amount: isCreditAcct ? -parseFloat(tx.amount) : parseFloat(tx.amount),
                 category: mapTellerCategory(tx.details?.category),
                 pending: tx.status === 'pending',
                 is_transfer: tx.details?.category?.toLowerCase().includes('transfer') || false,
@@ -248,6 +251,39 @@ export default async function handler(req, res) {
       const data = await fullSync(supabase, creds, { [enrollmentId]: accounts })
       return res.json({ ...data, success: true })
     } catch (e) { return res.status(500).json({ error: e.message }) }
+  }
+
+  // GET /api/teller/debug-navy — raw Teller amounts for Navy Fed credit accounts (no transformation)
+  if (sub === 'debug-navy' && req.method === 'GET') {
+    if (!supabase) return res.status(500).json({ error: 'Supabase not configured' })
+    let creds
+    try { creds = getTellerCreds() } catch (e) { return res.status(500).json({ error: e.message }) }
+
+    const { data: connections } = await supabase
+      .from('bank_connections').select('enrollment_id, institution_name, access_token')
+    const navyConn = (connections || []).find(c => c.institution_name?.toLowerCase().includes('navy'))
+    if (!navyConn) return res.status(404).json({ error: 'No Navy Fed connection found' })
+
+    const accounts = await tellerFetch('/accounts', navyConn.access_token, creds)
+    const creditAccounts = accounts.filter(a => a.type === 'credit' || a.subtype === 'credit_card')
+
+    const result = await Promise.all(creditAccounts.map(async (acc) => {
+      const rawTx = await tellerFetch(`/accounts/${acc.id}/transactions?count=10`, navyConn.access_token, creds)
+      return {
+        account: { id: acc.id, name: acc.name, type: acc.type, subtype: acc.subtype, last_four: acc.last_four },
+        transactions: rawTx.slice(0, 10).map(tx => ({
+          id:          tx.id,
+          date:        tx.date,
+          description: tx.description,
+          raw_amount:  tx.amount,            // exact value Teller returns — no transformation
+          amount_type: parseFloat(tx.amount) > 0 ? 'POSITIVE' : parseFloat(tx.amount) < 0 ? 'NEGATIVE' : 'ZERO',
+          category:    tx.details?.category,
+          status:      tx.status,
+        })),
+      }
+    }))
+
+    return res.json({ institution: navyConn.institution_name, accounts: result })
   }
 
   // DELETE /api/teller/disconnect-all

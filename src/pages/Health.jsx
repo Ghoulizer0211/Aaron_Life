@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, useCallback, useRef } from 'react'
+﻿import { useState, useEffect, useCallback, useRef, Fragment } from 'react'
 import { createPortal } from 'react-dom'
 import './Page.css'
 import './Health.css'
@@ -183,16 +183,32 @@ function useWorkoutLogs() {
   return { logs, refetch: load }
 }
 
-function useLastPerf(dayId) {
+function useLastPerf(dayId, beforeDate) {
   const [data, setData] = useState(null)
   useEffect(() => {
     if (!dayId) return
     setData(null)
-    fetch(`/api/gym/last-performance/${dayId}`)
+    const qs = beforeDate ? `?beforeDate=${beforeDate}` : ''
+    fetch(`/api/gym/last-performance/${dayId}${qs}`)
       .then(r => r.json())
       .then(j => { if (!j.error) setData(j) })
       .catch(() => {})
-  }, [dayId])
+  }, [dayId, beforeDate])
+  return data
+}
+
+function useLastPerfByNames(names, beforeDate) {
+  const [data, setData] = useState(null)
+  const key = names?.join(',') || ''
+  useEffect(() => {
+    if (!key) return
+    setData(null)
+    const qs = new URLSearchParams({ names: key, ...(beforeDate ? { beforeDate } : {}) })
+    fetch(`/api/gym/last-performance-by-names?${qs}`)
+      .then(r => r.json())
+      .then(j => { if (!j.error) setData(j) })
+      .catch(() => {})
+  }, [key, beforeDate])
   return data
 }
 
@@ -245,11 +261,9 @@ function BarChart({ items, height = 56 }) {
 // â”€â”€ Tab bar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const TABS = [
-  { id: 'today',    label: 'Overview' },
-  { id: 'sleep',    label: 'Sleep' },
-  { id: 'gym',      label: 'Gym' },
-  { id: 'activity', label: 'Activity' },
-  { id: 'trends',   label: 'Trends' },
+  { id: 'today', label: 'Overview' },
+  { id: 'gym',   label: 'Gym' },
+  { id: 'sleep', label: 'Sleep' },
 ]
 
 function HealthTabs({ tab, setTab }) {
@@ -891,18 +905,15 @@ function LoggedWorkout({ log, onDelete, onEdit }) {
   )
 }
 
-// ExerciseCard — collapsible 4-column grid (prev lbs | prev reps | new lbs | new reps)
-function ExerciseCard({ exercise, lastPerf, state, onChange }) {
-  const [open, setOpen] = useState(false)
+// ExerciseCard — split layout: prev (left, fixed) | inputs (right, grows with + Set)
+function ExerciseCard({ exercise, lastPerf, state, onChange, initialOpen = false }) {
+  const [open, setOpen] = useState(initialOpen)
   const lastSets = (lastPerf || []).filter(s => s.weight || s.reps)
 
-  // Auto-init sets when opening
+  // Auto-init with 1 empty set
   useEffect(() => {
     if (!open || state !== null) return
-    const initSets = lastSets.length > 0
-      ? lastSets.map(() => ({ weight: '', reps: '' }))
-      : [{ weight: '', reps: '' }]
-    onChange({ action: 'edit', sets: initSets })
+    onChange({ action: 'edit', sets: [{ weight: '', reps: '' }] })
   }, [open])
 
   const sets      = state?.sets || []
@@ -916,12 +927,13 @@ function ExerciseCard({ exercise, lastPerf, state, onChange }) {
   const addSet    = () => onChange({ action: 'edit', sets: [...sets, { weight: '', reps: '' }] })
   const removeSet = (i) => onChange({ action: 'edit', sets: sets.filter((_, j) => j !== i) })
 
-  const statusBadge = isSkipped ? <span className="ec-badge ec-badge--skip">Skipped</span>
-                    : hasData   ? <span className="ec-badge ec-badge--done">✓</span>
-                    : null
+  const statusBadge = isSkipped ? <span className="ec-badge ec-badge--skip">Skipped</span> : null
+
+  // Prev column shows max(lastSets.length, sets.length) rows — trailing rows show "—"
+  const prevRowCount = Math.max(lastSets.length, sets.length)
 
   return (
-    <div className={`ex-card card${hasData ? ' ex-card--done' : ''}`}>
+    <div className="ex-card card">
       <button className="ec-header" onClick={() => setOpen(o => !o)}>
         <span className="ec-name">{exercise.exercise_name}</span>
         <div className="ec-header-right">
@@ -938,30 +950,36 @@ function ExerciseCard({ exercise, lastPerf, state, onChange }) {
               <button className="ec-reset-sm" onClick={() => onChange(null)}>×</button>
             </div>
           ) : (
-            <>
-              <div className="ec-grid">
-                <div className="ec-grid-head">
-                  <span>Prev lbs</span><span>Prev reps</span>
-                  <span>lbs</span><span>reps</span><span/>
-                </div>
-                {sets.map((s, i) => (
-                  <div key={i} className="ec-grid-row">
-                    <span className="ec-prev">{lastSets[i]?.weight || '—'}</span>
-                    <span className="ec-prev">{lastSets[i]?.reps   || '—'}</span>
-                    <input className="ec-grid-input" type="number" inputMode="decimal"
-                      placeholder="0" value={s.weight} onChange={e => updateSet(i, 'weight', e.target.value)} />
-                    <input className="ec-grid-input" type="number" inputMode="numeric"
-                      placeholder="0" value={s.reps}   onChange={e => updateSet(i, 'reps',   e.target.value)} />
-                    <button className="ec-rm" onClick={() => removeSet(i)}
-                      style={{ visibility: sets.length > 1 ? 'visible' : 'hidden' }}>✕</button>
-                  </div>
-                ))}
-              </div>
-              <div className="ec-log-footer">
+            <div className="ec-table">
+              <span className="ec-th">Prev lbs</span>
+              <span className="ec-th ec-th-sep">Prev reps</span>
+              <span className="ec-th">lbs</span>
+              <span className="ec-th">reps</span>
+              <span />
+              {Array.from({ length: prevRowCount }, (_, i) => (
+                <Fragment key={i}>
+                  <span className="ec-td">{i < lastSets.length ? (lastSets[i]?.weight || '—') : ''}</span>
+                  <span className="ec-td ec-td-sep">{i < lastSets.length ? (lastSets[i]?.reps || '—') : ''}</span>
+                  {i < sets.length ? (
+                    <>
+                      <input className="ec-grid-input" type="number" inputMode="decimal"
+                        placeholder="0" value={sets[i].weight} onChange={e => updateSet(i, 'weight', e.target.value)} />
+                      <input className="ec-grid-input" type="number" inputMode="numeric"
+                        placeholder="0" value={sets[i].reps}   onChange={e => updateSet(i, 'reps',   e.target.value)} />
+                      <button className="ec-rm" onClick={() => removeSet(i)}
+                        style={{ visibility: sets.length > 1 ? 'visible' : 'hidden' }}>✕</button>
+                    </>
+                  ) : (
+                    <><span /><span /><span /></>
+                  )}
+                </Fragment>
+              ))}
+              <span /><span />
+              <div className="ec-log-footer" style={{ gridColumn: 'span 3' }}>
                 <button className="ec-add-set" onClick={addSet}>+ Set</button>
                 <button className="ec-skip-btn" onClick={() => onChange({ action: 'skip', sets: [] })}>Skip</button>
               </div>
-            </>
+            </div>
           )}
         </div>
       )}
@@ -975,7 +993,7 @@ function PlanDayLogger({ plans, date, onSave, onAutoSave, onDone, saving, onCanc
   const plan                 = plans.find(p => p.id === planId) || null
   const [dayId, setDayId]   = useState(null)
   const day                  = plan?.days?.find(d => d.id === dayId) || null
-  const lastPerf             = useLastPerf(dayId)
+  const lastPerf             = useLastPerf(dayId, date)
   const [states, setStates]  = useState({})
   const [notes, setNotes]    = useState('')
   const [err, setErr]        = useState(null)
@@ -1075,6 +1093,10 @@ function PlanDayLogger({ plans, date, onSave, onAutoSave, onDone, saving, onCanc
 
 // CustomLogger — draggable, collapsible exercises with set logging
 function CustomLogger({ date, onSave, onAutoSave, onDone, saving, onCancel, initialData }) {
+  const isEditing = !!initialData
+  const initNames = isEditing ? (initialData.exercises || []).filter(e => !e.skipped).map(e => e.exercise_name).filter(Boolean) : null
+  const prevPerf  = useLastPerfByNames(isEditing ? initNames : null, date)
+
   const [dayName,   setDayName]   = useState(initialData?.day_name || '')
   const [exercises, setExercises] = useState(() => {
     if (initialData?.exercises?.length) {
@@ -1210,24 +1232,41 @@ function CustomLogger({ date, onSave, onAutoSave, onDone, saving, onCancel, init
             </div>
             {isOpen && (
               <div className="ec-body">
-                <div className="ec-grid">
-                  <div className="ec-grid-head" style={{ gridTemplateColumns: '1fr 1fr 18px' }}>
-                    <span>LBS</span><span>REPS</span><span/>
-                  </div>
-                  {ex.sets.map((s, si) => (
-                    <div key={si} className="ec-grid-row" style={{ gridTemplateColumns: '1fr 1fr 18px' }}>
-                      <input className="ec-grid-input" type="number" inputMode="decimal"
-                        placeholder="0" value={s.weight} onChange={e => updSet(i, si, 'weight', e.target.value)} />
-                      <input className="ec-grid-input" type="number" inputMode="numeric"
-                        placeholder="0" value={s.reps} onChange={e => updSet(i, si, 'reps', e.target.value)} />
-                      <button className="ec-rm" onClick={() => remSet(i, si)}
-                        style={{ visibility: ex.sets.length > 1 ? 'visible' : 'hidden' }}>✕</button>
+                {(() => {
+                  const lastSets = (prevPerf?.[ex.name] || []).filter(s => s.weight || s.reps)
+                  const prevRowCount = Math.max(lastSets.length, ex.sets.length)
+                  return (
+                    <div className="ec-table">
+                      <span className="ec-th">Prev lbs</span>
+                      <span className="ec-th ec-th-sep">Prev reps</span>
+                      <span className="ec-th">lbs</span>
+                      <span className="ec-th">reps</span>
+                      <span />
+                      {Array.from({ length: prevRowCount }, (_, si) => (
+                        <Fragment key={si}>
+                          <span className="ec-td">{si < lastSets.length ? (lastSets[si]?.weight || '—') : ''}</span>
+                          <span className="ec-td ec-td-sep">{si < lastSets.length ? (lastSets[si]?.reps || '—') : ''}</span>
+                          {si < ex.sets.length ? (
+                            <>
+                              <input className="ec-grid-input" type="number" inputMode="decimal"
+                                placeholder="0" value={ex.sets[si].weight} onChange={e => updSet(i, si, 'weight', e.target.value)} />
+                              <input className="ec-grid-input" type="number" inputMode="numeric"
+                                placeholder="0" value={ex.sets[si].reps}   onChange={e => updSet(i, si, 'reps',   e.target.value)} />
+                              <button className="ec-rm" onClick={() => remSet(i, si)}
+                                style={{ visibility: ex.sets.length > 1 ? 'visible' : 'hidden' }}>✕</button>
+                            </>
+                          ) : (
+                            <><span /><span /><span /></>
+                          )}
+                        </Fragment>
+                      ))}
+                      <span /><span />
+                      <div className="ec-log-footer" style={{ gridColumn: 'span 3' }}>
+                        <button className="ec-add-set" onClick={() => addSet(i)}>+ Set</button>
+                      </div>
                     </div>
-                  ))}
-                </div>
-                <div className="ec-log-footer">
-                  <button className="ec-add-set" onClick={() => addSet(i)}>+ Set</button>
-                </div>
+                  )
+                })()}
               </div>
             )}
           </div>
@@ -1464,10 +1503,82 @@ function PlanForm({ plan, onBack, onSaved }) {
   )
 }
 
+// EditLogView — edit an existing workout log using ExerciseCard layout
+function EditLogView({ log, date, onSave, saving, onCancel }) {
+  const exerciseNames = (log.exercises || []).filter(e => !e.skipped).map(e => e.exercise_name).filter(Boolean)
+  const prevPerf = useLastPerfByNames(exerciseNames.length ? exerciseNames : null, date)
+
+  const [states, setStates] = useState(() => {
+    const s = {}
+    for (const ex of (log.exercises || [])) {
+      if (!ex.exercise_name) continue
+      if (ex.skipped) {
+        s[ex.exercise_name] = { action: 'skip', sets: [] }
+      } else {
+        s[ex.exercise_name] = {
+          action: 'edit',
+          sets: (ex.sets_data || []).length
+            ? ex.sets_data.map(set => ({ weight: String(set.weight ?? ''), reps: String(set.reps ?? '') }))
+            : [{ weight: '', reps: '' }],
+        }
+      }
+    }
+    return s
+  })
+  const [notes, setNotes] = useState(log.notes || '')
+  const [err, setErr]     = useState(null)
+
+  const buildPayload = () => ({
+    date,
+    plan_id:   log.plan_id   || null,
+    plan_name: log.plan_name || null,
+    day_id:    log.day_id    || null,
+    day_name:  log.day_name  || null,
+    notes:     notes.trim()  || null,
+    exercises: (log.exercises || []).filter(e => e.exercise_name).map(ex => ({
+      exercise_name: ex.exercise_name,
+      sets_data:     (states[ex.exercise_name]?.sets || []).filter(s => s.weight || s.reps),
+      skipped:       states[ex.exercise_name]?.action === 'skip',
+    })),
+  })
+
+  const handleSave = async () => {
+    setErr(null)
+    const e = await onSave(buildPayload())
+    if (e) setErr(e)
+  }
+
+  return (
+    <div>
+      {(log.exercises || []).filter(e => e.exercise_name).map(ex => (
+        <ExerciseCard
+          key={ex.exercise_name}
+          exercise={{ exercise_name: ex.exercise_name }}
+          lastPerf={prevPerf?.[ex.exercise_name] || null}
+          state={states[ex.exercise_name] || null}
+          onChange={val => setStates(s => ({ ...s, [ex.exercise_name]: val }))}
+        />
+      ))}
+      <textarea className="form-input form-textarea" placeholder="Session notes (optional)…"
+        value={notes} onChange={e => setNotes(e.target.value)} style={{ marginTop: 8 }} />
+      {err && <p className="form-error">{err}</p>}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8 }}>
+        <button className="connect-btn health-connect-btn" onClick={handleSave} disabled={saving} style={{ margin: 0 }}>
+          {saving ? 'Saving…' : 'Save Changes'}
+        </button>
+      </div>
+      <button className="gym-cancel-link" onClick={onCancel}>Cancel</button>
+    </div>
+  )
+}
+
 // GymLogView — date-centric logging tab
 function GymLogView({ plansHook, logsHook, saving, onSave, onDelete, date, onDateChange }) {
   const [mode, setMode] = useState(null)
   const existingLog     = logsHook.logs.find(l => l.date === date)
+
+  // Reset mode whenever date changes (covers WeekStrip navigation which bypasses handleDateChange)
+  useEffect(() => { setMode(null) }, [date])
 
   const handleDateChange = (d) => { onDateChange(d); setMode(null) }
   const handleSave       = async (data, replaceId) => { const err = await onSave(data, replaceId); if (!err) setMode(null); return err }
@@ -1497,7 +1608,7 @@ function GymLogView({ plansHook, logsHook, saving, onSave, onDelete, date, onDat
       {existingLog && mode !== 'edit' ? (
         <LoggedWorkout log={existingLog} onDelete={onDelete} onEdit={() => setMode('edit')} />
       ) : existingLog && mode === 'edit' ? (
-        <CustomLogger date={date} onSave={(data) => handleSave(data, existingLog.id)} onAutoSave={handleAutoSave} onDone={handleDone} saving={saving} onCancel={() => setMode(null)} initialData={existingLog} />
+        <EditLogView log={existingLog} date={date} onSave={(data) => handleSave(data, existingLog.id)} saving={saving} onCancel={() => setMode(null)} />
       ) : mode === 'plan' ? (
         plansHook.plans.length === 0
           ? <p className="health-empty">No plans yet — create one in the Plans tab.</p>
@@ -1886,7 +1997,7 @@ export default function Health() {
 
   if (!linked) return <ConnectScreen onConnect={handleConnect} loading={connectLoading} error={connectError} />
 
-  const showDateNav = tab === 'today' || tab === 'sleep' || tab === 'activity'
+  const showDateNav = tab === 'today' || tab === 'sleep'
 
   return (
     <div className="page health-page">
@@ -1898,11 +2009,9 @@ export default function Health() {
         <DateNav date={date} setDate={setDate} onSync={oura.refetch} syncing={oura.loading} />
       )}
 
-      {tab === 'today'    && <TodayTab    oura={oura}    logs={logsHook.logs} date={date} onOpenGym={() => setTab('gym')} />}
-      {tab === 'sleep'    && <SleepTab    oura={oura}    weekData={weekData}  date={date} />}
-      {tab === 'gym'      && <GymTab />}
-      {tab === 'activity' && <ActivityTab oura={oura}    date={date} />}
-      {tab === 'trends'   && <TrendsTab   weekData={weekData} logs={logsHook.logs} />}
+      {tab === 'today' && <TodayTab oura={oura} logs={logsHook.logs} date={date} onOpenGym={() => setTab('gym')} />}
+      {tab === 'sleep' && <SleepTab oura={oura} weekData={weekData} date={date} />}
+      {tab === 'gym'   && <GymTab />}
     </div>
   )
 }

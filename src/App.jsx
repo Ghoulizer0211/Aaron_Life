@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import Header from './components/Header'
 import BottomNav from './components/BottomNav'
 import Schedule from './pages/Schedule'
+import Todos from './pages/Todos'
 import Health from './pages/Health'
 import Finance from './pages/Finance'
 import Settings from './pages/Settings'
@@ -95,6 +96,7 @@ export default function App() {
   const renderPage = () => {
     switch (activeTab) {
       case 'schedule': return <Schedule />
+      case 'todos':    return <Todos />
       case 'health':   return <Health />
       case 'finance':  return <Finance />
       case 'settings': return <Settings />

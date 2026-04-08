@@ -1,5 +1,33 @@
 import { getSupabase } from './_lib/supabase.js'
 
+// Shared helper: fetch most recent sets per exercise name, optionally excluding a date
+async function lastPerfByNames(supabase, names, beforeDate) {
+  const { data: exLogs } = await supabase
+    .from('exercise_logs')
+    .select('exercise_name, sets_data, log_id')
+    .in('exercise_name', names)
+    .eq('skipped', false)
+  if (!exLogs?.length) return {}
+
+  const logIds = [...new Set(exLogs.map(e => e.log_id))]
+  const { data: wlogs } = await supabase
+    .from('workout_logs').select('id, date').in('id', logIds)
+  const dateMap = Object.fromEntries((wlogs || []).map(l => [l.id, l.date]))
+
+  const best = {}
+  for (const el of exLogs) {
+    const date = dateMap[el.log_id]
+    if (!date || (beforeDate && date >= beforeDate)) continue
+    if (!el.sets_data?.some(s => s.weight || s.reps)) continue
+    if (!best[el.exercise_name] || date > best[el.exercise_name].date) {
+      best[el.exercise_name] = { date, sets_data: el.sets_data || [] }
+    }
+  }
+  const result = {}
+  for (const [name, val] of Object.entries(best)) result[name] = val.sets_data
+  return result
+}
+
 export default async function handler(req, res) {
   const parts = req.url.split('?')[0].split('/').filter(Boolean)
   // ['api', 'gym', sub, p1?, p2?]
@@ -185,17 +213,23 @@ export default async function handler(req, res) {
 
   // ── LAST PERFORMANCE ────────────────────────────────────────────────────────
 
-  // GET /api/gym/last-performance/:dayId
+  // GET /api/gym/last-performance/:dayId?beforeDate=YYYY-MM-DD
   if (sub === 'last-performance' && p1 && req.method === 'GET') {
-    const { data: lastLog } = await supabase
-      .from('workout_logs').select('id').eq('day_id', p1)
-      .order('date', { ascending: false }).limit(1).maybeSingle()
-    if (!lastLog) return res.json({})
-    const { data: exLogs } = await supabase
-      .from('exercise_logs').select('*').eq('log_id', lastLog.id).eq('skipped', false)
-    const result = {}
-    for (const el of (exLogs || [])) result[el.exercise_name] = el.sets_data || []
-    return res.json(result)
+    const beforeDate = new URL(req.url, 'http://x').searchParams.get('beforeDate')
+    const { data: dayExercises } = await supabase
+      .from('workout_exercises').select('exercise_name').eq('day_id', p1)
+    if (!dayExercises?.length) return res.json({})
+    const names = dayExercises.map(e => e.exercise_name)
+    return res.json(await lastPerfByNames(supabase, names, beforeDate))
+  }
+
+  // GET /api/gym/last-performance-by-names?names=A,B&beforeDate=YYYY-MM-DD
+  if (sub === 'last-performance-by-names' && req.method === 'GET') {
+    const url = new URL(req.url, 'http://x')
+    const names = (url.searchParams.get('names') || '').split(',').map(n => n.trim()).filter(Boolean)
+    const beforeDate = url.searchParams.get('beforeDate')
+    if (!names.length) return res.json({})
+    return res.json(await lastPerfByNames(supabase, names, beforeDate))
   }
 
   res.status(405).end()

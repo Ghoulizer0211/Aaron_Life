@@ -628,7 +628,7 @@
 
 /* ── Exercise card ───────────────────────────────────────────────────────────── */
 .ex-card { margin-bottom: 10px; padding: 12px 14px; overflow: hidden; }
-.ex-card--done { border-color: var(--accent); }
+.ex-card--done { }
 .ec-header {
   display: flex; align-items: center; justify-content: space-between; gap: 8px;
   width: 100%; font-family: inherit; text-align: left;
@@ -641,22 +641,31 @@
 .ec-name { font-size: 15px; font-weight: 700; color: var(--text-primary); min-width: 0; }
 .ec-body { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
 
-/* 4-column set grid */
-.ec-grid { display: flex; flex-direction: column; gap: 5px; width: 100%; }
-.ec-grid-head, .ec-grid-row {
+/* Unified grid: prev-lbs | prev-reps | lbs | reps | × — rows align across both sides */
+.ec-table {
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr 1fr 18px;
-  gap: 5px; align-items: center; width: 100%;
+  grid-template-columns: 1fr 1fr 1fr 1fr 20px;
+  column-gap: 6px;
+  row-gap: 5px;
+  align-items: center;
 }
-.ec-grid-head span {
+.ec-th {
   font-size: 10px; font-weight: 700; color: var(--text-muted);
   text-transform: uppercase; letter-spacing: 0.04em; text-align: center;
+  padding-bottom: 5px; border-bottom: 1px solid rgba(255,255,255,0.07);
 }
+.ec-th-sep { border-right: 1px solid var(--border); padding-right: 4px; }
+.ec-td {
+  font-size: 13px; color: rgba(255,255,255,0.28);
+  text-align: center; font-weight: 500; padding: 4px 0;
+}
+.ec-td-sep { border-right: 1px solid var(--border); padding-right: 4px; }
+
 .ec-prev { font-size: 13px; color: rgba(255,255,255,0.28); text-align: center; font-weight: 500; }
 .ec-grid-input {
   width: 100%; padding: 7px 2px; background: var(--surface);
   border: 1px solid var(--border); border-radius: 8px;
-  font-size: 14px; font-weight: 600; color: var(--text-primary);
+  font-size: 16px; font-weight: 600; color: var(--text-primary);
   font-family: inherit; text-align: center; box-sizing: border-box; min-width: 0;
 }
 .ec-rm { font-size: 11px; color: var(--text-muted); text-align: center; padding: 2px; }
@@ -810,7 +819,7 @@
 .cl-ex-header { display: flex; align-items: center; gap: 8px; }
 .cl-ex-toggle { flex: 1; display: flex; align-items: center; justify-content: space-between; gap: 8px; font-family: inherit; text-align: left; min-width: 0; }
 .cl-placeholder { color: var(--text-muted); font-weight: 400; font-size: 14px; }
-.cl-ex-name-input { flex: 1; background: transparent; border: none; outline: none; font-size: 15px; font-weight: 700; color: var(--text-primary); font-family: inherit; min-width: 0; padding: 0; }
+.cl-ex-name-input { flex: 1; background: transparent; border: none; outline: none; font-size: 16px; font-weight: 700; color: var(--text-primary); font-family: inherit; min-width: 0; padding: 0; }
 .cl-ex-name-input::placeholder { color: var(--text-muted); font-weight: 500; }
 .cl-chevron-btn { flex-shrink: 0; padding: 2px 4px; font-family: inherit; background: transparent; border: none; color: var(--text-muted); cursor: pointer; }
 

@@ -29,8 +29,10 @@
   min-height: 0;
 }
 
-/* Schedule manages its own internal scroll */
-.app-content[data-tab="schedule"] {
+/* Schedule, Todos, and Finance manage their own internal scroll */
+.app-content[data-tab="schedule"],
+.app-content[data-tab="todos"],
+.app-content[data-tab="finance"] {
   overflow: hidden;
   padding-bottom: 0;
 }
