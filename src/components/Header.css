@@ -60,29 +60,4 @@
 
 /* ── Desktop header ────────────────────────────────────────────────────────── */
 
-@media (min-width: 768px) {
-  .header {
-    padding: 18px 28px;
-    background: var(--bg-secondary);
-  }
-
-  .header-brand { display: none; }
-
-  .header-title {
-    font-family: 'Orbitron', sans-serif;
-    font-size: 24px;
-    font-weight: 700;
-    color: var(--text-primary);
-    letter-spacing: 2px;
-    text-transform: uppercase;
-    text-shadow: 0 0 20px rgba(0, 229, 255, 0.2);
-  }
-
-  .header-date-right {
-    display: block;
-    font-size: 18px;
-    color: var(--text-secondary);
-    letter-spacing: 0.5px;
-    font-family: 'Exo 2', sans-serif;
-  }
-}
+html.is-desktop .header { display: none; }

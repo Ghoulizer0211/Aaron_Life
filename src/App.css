@@ -40,20 +40,19 @@
 
 /* ── Desktop layout (≥ 768px) ─────────────────────────────────────────────── */
 
-@media (min-width: 768px) {
-  .app {
-    max-width: none;
-    width: 100%;
-    flex-direction: row;    /* sidebar | content */
-    margin: 0;
-  }
+html.is-desktop .app {
+  max-width: none;
+  width: 100%;
+  flex-direction: column;
+  margin: 0;
+}
 
-  .app-main {
-    flex: 1;
-    min-width: 0;
-  }
+html.is-desktop .app-main {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
 
-  .app-content {
-    padding-bottom: 0;     /* no bottom nav on desktop */
-  }
+html.is-desktop .app-content {
+  padding-bottom: 0;
 }

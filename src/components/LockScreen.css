@@ -197,7 +197,5 @@
 }
 .pinsetup-close svg { width: 14px; height: 14px; }
 
-@media (min-width: 768px) {
-  .pinsetup-overlay { align-items: center; }
-  .pinsetup-sheet   { border-radius: 16px; max-height: 80dvh; }
-}
+html.is-desktop .pinsetup-overlay { align-items: center; }
+html.is-desktop .pinsetup-sheet   { border-radius: 16px; max-height: 80dvh; }

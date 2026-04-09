@@ -54,9 +54,8 @@ html, body {
   flex-direction: column;
 }
 
-@media (min-width: 768px) {
-  html, body { font-size: 20px; }
-}
+html.is-desktop,
+html.is-desktop body { font-size: 20px; }
 
 button {
   cursor: pointer;

@@ -2,7 +2,6 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import Header from './components/Header'
 import BottomNav from './components/BottomNav'
 import Schedule from './pages/Schedule'
-import Todos from './pages/Todos'
 import Health from './pages/Health'
 import Finance from './pages/Finance'
 import Settings from './pages/Settings'
@@ -68,6 +67,15 @@ export default function App() {
     }
   }, []) // eslint-disable-line
 
+  // ── Stable layout class — only updates on orientation change, not resize ──────
+  useEffect(() => {
+    const apply = () => setTimeout(() => {
+      document.documentElement.classList.toggle('is-desktop', screen.width >= 768)
+    }, 100)
+    window.addEventListener('orientationchange', apply)
+    return () => window.removeEventListener('orientationchange', apply)
+  }, [])
+
   // ── Inactivity timeout — lock after 15 min ──────────────────────────────────
   const TIMEOUT_MS = 15 * 60 * 1000
   const timerRef = useRef(null)
@@ -96,7 +104,6 @@ export default function App() {
   const renderPage = () => {
     switch (activeTab) {
       case 'schedule': return <Schedule />
-      case 'todos':    return <Todos />
       case 'health':   return <Health />
       case 'finance':  return <Finance />
       case 'settings': return <Settings />

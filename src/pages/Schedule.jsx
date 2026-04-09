@@ -1,24 +1,19 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { supabase, sb } from '../lib/supabase'
+import TaskPanel from './TaskPanel'
 import './Page.css'
 import './Schedule.css'
 
-// ─── Constants ───────────────────────────────────────────────────────────────
+// ─── Constants ────────────────────────────────────────────────────────────────
 
-const SLOT_H     = 36   // px per 30-min slot (keep in sync with CSS .time-label height)
-const GRID_START = 0    // 12 AM
-const GRID_END   = 24   // midnight (full day)
+const SLOT_H     = 36
+const GRID_START = 0
+const GRID_END   = 24
 
 const COLOR_PRESETS = [
-  '#00e5ff', // neon cyan
-  '#ff2d78', // neon pink
-  '#00ff9d', // neon green
-  '#ffe600', // neon yellow
-  '#bf5fff', // neon purple
-  '#ff6c2f', // neon orange
-  '#00bfff', // electric blue
-  '#ff3864', // hot red
+  '#00e5ff', '#ff2d78', '#00ff9d', '#ffe600',
+  '#bf5fff', '#ff6c2f', '#00bfff', '#ff3864',
 ]
 
 const LEGACY_COLORS = {
@@ -34,9 +29,9 @@ for (let h = GRID_START; h < GRID_END; h++) {
   TIME_SLOTS.push({ h, m: 0 })
   TIME_SLOTS.push({ h, m: 30 })
 }
-const TOTAL_H = TIME_SLOTS.length * SLOT_H   // full column height in px
+const TOTAL_H = TIME_SLOTS.length * SLOT_H
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function todayStr() {
   return new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' })
@@ -95,20 +90,15 @@ function dayLabel(day) {
   return `${DAY_SHORT[day.getDay()]}, ${MONTH_SHORT[day.getMonth()]} ${day.getDate()}, ${day.getFullYear()}`
 }
 
-// Returns { top, height } in px for absolute positioning in the day column
 function getEventMetrics(ev) {
   const st = ev.startTime || ev.time || ''
   if (!st) return null
-
   const [sh, sm] = st.split(':').map(Number)
   const startMin  = sh * 60 + sm
   const gridStart = GRID_START * 60
   const gridEnd   = GRID_END * 60
-
   if (startMin >= gridEnd) return null
-
   const top = ((startMin - gridStart) / 30) * SLOT_H
-
   let height = SLOT_H
   if (ev.endTime) {
     const [eh, em] = ev.endTime.split(':').map(Number)
@@ -117,7 +107,6 @@ function getEventMetrics(ev) {
     if (dur > 0) height = (dur / 30) * SLOT_H
   }
   height = Math.max(SLOT_H * 0.5, height)
-
   return { top, height }
 }
 
@@ -127,8 +116,6 @@ function getNowTop() {
   return ((h * 60 + m - GRID_START * 60) / 30) * SLOT_H
 }
 
-// ─── UUID helper (crypto.randomUUID requires HTTPS; fallback for HTTP dev) ────
-
 function genId() {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID()
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
@@ -137,11 +124,28 @@ function genId() {
   })
 }
 
-// ─── Events hook (Supabase when configured, Express API as fallback) ──────────
+// ─── useEvents hook ───────────────────────────────────────────────────────────
+
+// DB uses snake_case (start_time, end_time); app uses camelCase (startTime, endTime)
+function evFromDb(row) {
+  return {
+    id:        row.id,
+    title:     row.title,
+    date:      typeof row.date === 'string' ? row.date.slice(0, 10) : row.date,
+    startTime: row.start_time || '',
+    endTime:   row.end_time   || '',
+    color:     row.color      || COLOR_PRESETS[0],
+    location:  row.location   || '',
+    notes:     row.notes      || '',
+  }
+}
+
+function evToDb({ startTime, endTime, ...ev }) {
+  return { ...ev, start_time: startTime || null, end_time: endTime || null }
+}
 
 function useEvents() {
   const [events, setEvents] = useState(() => {
-    // If Supabase is configured, don't pre-load stale localStorage data
     if (supabase) return []
     try { return JSON.parse(localStorage.getItem('aaron_life_events') || '[]') }
     catch { return [] }
@@ -152,15 +156,11 @@ function useEvents() {
     return list
   }
 
-  // Load canonical data on mount
   useEffect(() => {
     if (supabase) {
-      // Clear any stale local data and load fresh from Supabase
       localStorage.removeItem('aaron_life_events')
       sb(supabase.from('events').select('*').order('date'))
-        .then(({ data } = {}) => {
-          if (Array.isArray(data)) setEvents(data)
-        })
+        .then(({ data } = {}) => { if (Array.isArray(data)) setEvents(data.map(evFromDb)) })
     } else {
       fetch('/api/events')
         .then(r => r.json())
@@ -172,15 +172,8 @@ function useEvents() {
   const addEvent = (d) => {
     const ev = { ...d, id: genId() }
     setEvents(p => supabase ? [...p, ev] : save([...p, ev]))
-    if (supabase) {
-      sb(supabase.from('events').insert(ev))
-    } else {
-      fetch('/api/events', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(ev),
-      }).catch(() => {})
-    }
+    if (supabase) sb(supabase.from('events').insert(evToDb(ev)))
+    else fetch('/api/events', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(ev) }).catch(() => {})
   }
 
   const updateEvent = (id, d) => {
@@ -188,15 +181,8 @@ function useEvents() {
       const next = p.map(e => e.id === id ? { ...e, ...d } : e)
       return supabase ? next : save(next)
     })
-    if (supabase) {
-      sb(supabase.from('events').update(d).eq('id', id))
-    } else {
-      fetch(`/api/events/${id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(d),
-      }).catch(() => {})
-    }
+    if (supabase) sb(supabase.from('events').update(evToDb(d)).eq('id', id))
+    else fetch(`/api/events/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(d) }).catch(() => {})
   }
 
   const deleteEvent = (id) => {
@@ -204,27 +190,102 @@ function useEvents() {
       const next = p.filter(e => e.id !== id)
       return supabase ? next : save(next)
     })
-    if (supabase) {
-      sb(supabase.from('events').delete().eq('id', id))
-    } else {
-      fetch(`/api/events/${id}`, { method: 'DELETE' }).catch(() => {})
-    }
+    if (supabase) sb(supabase.from('events').delete().eq('id', id))
+    else fetch(`/api/events/${id}`, { method: 'DELETE' }).catch(() => {})
   }
 
   return { events, addEvent, updateEvent, deleteEvent }
 }
 
-// ─── Week/Day Grid ────────────────────────────────────────────────────────────
+// ─── useTasks hook ────────────────────────────────────────────────────────────
 
-function WeekGrid({ days, events, onCellClick, onEventClick, onEventToggle, onEventUpdate }) {
-  const today        = todayStr()
-  const bodyRef      = useRef(null)
-  const weekInnerRef = useRef(null)
-  const dragRef      = useRef(null)
+function useTasks() {
+  const [tasks, setTasks] = useState(() => {
+    if (supabase) return []
+    try {
+      const raw = localStorage.getItem('aaron_tasks')
+      if (raw) return JSON.parse(raw)
+      // Migrate from old aaron_todos if present
+      const old = localStorage.getItem('aaron_todos')
+      if (old) {
+        const todos = JSON.parse(old)
+        const migrated = todos.map(t => ({
+          id: t.id || genId(),
+          title: t.text || t.title || '',
+          priority: 'medium',
+          due_date: t.date || null,
+          duration: 60,
+          category: t.category || 'personal',
+          notes: null,
+          done: t.done || false,
+          done_at: t.doneAt || null,
+          created_at: t.createdAt || new Date().toISOString(),
+          scheduled_date: null,
+          scheduled_start: null,
+          scheduled_end: null,
+        }))
+        localStorage.setItem('aaron_tasks', JSON.stringify(migrated))
+        return migrated
+      }
+    } catch {}
+    return []
+  })
+
+  useEffect(() => {
+    if (supabase) {
+      sb(supabase.from('tasks').select('*').order('created_at', { ascending: false }))
+        .then(({ data } = {}) => { if (Array.isArray(data)) setTasks(data) })
+    }
+  }, [])
+
+  const save = (list) => { localStorage.setItem('aaron_tasks', JSON.stringify(list)); return list }
+
+  const addTask = (d) => {
+    const task = {
+      ...d, id: genId(),
+      done: false, done_at: null,
+      created_at: new Date().toISOString(),
+    }
+    setTasks(p => supabase ? [task, ...p] : save([task, ...p]))
+    if (supabase) sb(supabase.from('tasks').insert(task))
+    return task
+  }
+
+  const updateTask = (id, d) => {
+    setTasks(p => {
+      const next = p.map(t => t.id === id ? { ...t, ...d } : t)
+      return supabase ? next : save(next)
+    })
+    if (supabase) sb(supabase.from('tasks').update(d).eq('id', id))
+  }
+
+  const deleteTask = (id) => {
+    setTasks(p => {
+      const next = p.filter(t => t.id !== id)
+      return supabase ? next : save(next)
+    })
+    if (supabase) sb(supabase.from('tasks').delete().eq('id', id))
+  }
+
+  return { tasks, addTask, updateTask, deleteTask }
+}
+
+// ─── WeekGrid ─────────────────────────────────────────────────────────────────
+
+function WeekGrid({
+  days, events, tasks, draggingTask,
+  onCellClick, onEventClick, onEventToggle, onEventUpdate,
+  onTaskClick, onTaskSchedule, onTaskToggle,
+}) {
+  const today          = todayStr()
+  const bodyRef        = useRef(null)
+  const weekInnerRef   = useRef(null)
+  const dragRef        = useRef(null)
   const justDraggedRef = useRef(false)
-  const [nowTop, setNowTop]     = useState(getNowTop)
-  const [dragState, setDragState] = useState(null)
-  // dragState: { evId, di, top, height, color, title }
+
+  const [nowTop,     setNowTop]     = useState(getNowTop)
+  const [dragState,  setDragState]  = useState(null)
+  const [dropSlot,   setDropSlot]   = useState(null) // { di, top, height } — task DnD ghost
 
   useEffect(() => {
     const t = setInterval(() => setNowTop(getNowTop()), 60_000)
@@ -232,9 +293,16 @@ function WeekGrid({ days, events, onCellClick, onEventClick, onEventToggle, onEv
   }, [])
 
   useEffect(() => {
-    if (bodyRef.current)
-      bodyRef.current.scrollTop = Math.max(0, nowTop - 120)
+    if (bodyRef.current) bodyRef.current.scrollTop = Math.max(0, nowTop - 120)
   }, []) // eslint-disable-line
+
+  // Clear drop ghost when drag ends (user cancels or drops)
+  useEffect(() => {
+    if (draggingTask) return
+    setDropSlot(null)
+  }, [draggingTask])
+
+  // ── Event drag (reschedule) ──────────────────────────────────────────────────
 
   const handleColClick = (e, dateStr) => {
     if (justDraggedRef.current) return
@@ -253,39 +321,32 @@ function WeekGrid({ days, events, onCellClick, onEventClick, onEventToggle, onEv
     const metrics = getEventMetrics(ev)
     if (!metrics) return
 
-    const startX = e.touches ? e.touches[0].clientX : e.clientX
-    const startY = e.touches ? e.touches[0].clientY : e.clientY
+    const isTouch = !!e.touches
+    const startX  = isTouch ? e.touches[0].clientX : e.clientX
+    const startY  = isTouch ? e.touches[0].clientY : e.clientY
     let holdTimer = null
-    let dragReady = false  // true after hold threshold met
+    let earlyMoveListener = null
 
-    // Cancel hold if finger moves too much before timer fires
-    const onEarlyMove = (moveEv) => {
-      const cx = moveEv.touches ? moveEv.touches[0].clientX : moveEv.clientX
-      const cy = moveEv.touches ? moveEv.touches[0].clientY : moveEv.clientY
-      if (Math.hypot(cx - startX, cy - startY) > 8) cancel()
-    }
-
-    const cancel = () => {
+    const cancelEarly = () => {
       clearTimeout(holdTimer)
-      window.removeEventListener('mousemove', onEarlyMove)
-      window.removeEventListener('touchmove', onEarlyMove)
-      window.removeEventListener('mouseup', cancel)
-      window.removeEventListener('touchend', cancel)
+      if (earlyMoveListener) {
+        window.removeEventListener('mousemove',  earlyMoveListener)
+        window.removeEventListener('touchmove',  earlyMoveListener)
+      }
+      window.removeEventListener('mouseup',  cancelEarly)
+      window.removeEventListener('touchend', cancelEarly)
     }
 
-    const activateDrag = () => {
-      cancel()  // remove early-move listeners
-      dragReady = true
-
-      // Haptic feedback on mobile
-      if (navigator.vibrate) navigator.vibrate(40)
+    const activateDrag = (activateX = startX, activateY = startY) => {
+      cancelEarly()
+      if (isTouch && navigator.vibrate) navigator.vibrate(40)
 
       const cols = weekInnerRef.current?.querySelectorAll('.day-col')
       if (cols?.[di]) {
         const colRect = cols[di].getBoundingClientRect()
         dragRef.current = {
           ev, origDi: di, currentDi: di,
-          offsetY: startY - colRect.top + (bodyRef.current?.scrollTop || 0) - metrics.top,
+          offsetY: activateY - colRect.top + (bodyRef.current?.scrollTop || 0) - metrics.top,
           height: metrics.height, currentTop: metrics.top, didDrag: false,
         }
       }
@@ -351,13 +412,188 @@ function WeekGrid({ days, events, onCellClick, onEventClick, onEventToggle, onEv
       window.addEventListener('touchend', onUp)
     }
 
-    // Start hold timer — 600ms hold activates drag
-    holdTimer = setTimeout(activateDrag, 600)
-    window.addEventListener('mousemove', onEarlyMove)
-    window.addEventListener('touchmove', onEarlyMove, { passive: true })
-    window.addEventListener('mouseup', cancel)
-    window.addEventListener('touchend', cancel)
+    if (isTouch) {
+      // Touch: require 600ms hold to distinguish drag from scroll
+      earlyMoveListener = (moveEv) => {
+        const cx = moveEv.touches[0].clientX
+        const cy = moveEv.touches[0].clientY
+        if (Math.hypot(cx - startX, cy - startY) > 8) cancelEarly()
+      }
+      holdTimer = setTimeout(activateDrag, 600)
+      window.addEventListener('touchmove', earlyMoveListener, { passive: true })
+      window.addEventListener('touchend', cancelEarly)
+    } else {
+      // Mouse: activate drag immediately on first movement > threshold
+      earlyMoveListener = (moveEv) => {
+        if (Math.hypot(moveEv.clientX - startX, moveEv.clientY - startY) > 5) {
+          window.removeEventListener('mousemove', earlyMoveListener)
+          activateDrag(moveEv.clientX, moveEv.clientY)
+        }
+      }
+      window.addEventListener('mousemove', earlyMoveListener)
+      window.addEventListener('mouseup', cancelEarly)
+    }
   }
+
+  // ── Task calendar drag (reschedule scheduled tasks) ──────────────────────
+
+  const handleTaskCalDragStart = (e, task, di) => {
+    if (task.done) return
+    const metrics = getEventMetrics({ startTime: task.scheduled_start, endTime: task.scheduled_end })
+    if (!metrics) return
+
+    const isTouch = !!e.touches
+    const startX  = isTouch ? e.touches[0].clientX : e.clientX
+    const startY  = isTouch ? e.touches[0].clientY : e.clientY
+    let holdTimer = null
+    let earlyMoveListener = null
+
+    const cancelEarly = () => {
+      clearTimeout(holdTimer)
+      if (earlyMoveListener) {
+        window.removeEventListener('mousemove', earlyMoveListener)
+        window.removeEventListener('touchmove', earlyMoveListener)
+      }
+      window.removeEventListener('mouseup',  cancelEarly)
+      window.removeEventListener('touchend', cancelEarly)
+    }
+
+    const activateDrag = (activateX = startX, activateY = startY) => {
+      cancelEarly()
+      if (isTouch && navigator.vibrate) navigator.vibrate(40)
+
+      const cols = weekInnerRef.current?.querySelectorAll('.day-col')
+      if (cols?.[di]) {
+        const colRect = cols[di].getBoundingClientRect()
+        dragRef.current = {
+          task, isTask: true, origDi: di, currentDi: di,
+          offsetY: activateY - colRect.top + (bodyRef.current?.scrollTop || 0) - metrics.top,
+          height: metrics.height, currentTop: metrics.top, didDrag: false,
+        }
+      }
+      setDragState({ taskId: task.id, isTask: true, di, top: metrics.top, height: metrics.height, title: task.title })
+
+      const onMove = (moveEv) => {
+        if (!dragRef.current) return
+        moveEv.preventDefault()
+        const clientY = moveEv.touches ? moveEv.touches[0].clientY : moveEv.clientY
+        const clientX = moveEv.touches ? moveEv.touches[0].clientX : moveEv.clientX
+        dragRef.current.didDrag = true
+
+        const cols = weekInnerRef.current?.querySelectorAll('.day-col')
+        if (!cols) return
+        let targetDi = dragRef.current.currentDi
+        cols.forEach((col, i) => {
+          const r = col.getBoundingClientRect()
+          if (clientX >= r.left && clientX <= r.right) targetDi = i
+        })
+        const colRect = cols[targetDi].getBoundingClientRect()
+        const posInCol = clientY - colRect.top + (bodyRef.current?.scrollTop || 0) - dragRef.current.offsetY
+        const snapped  = Math.round(posInCol / SLOT_H) * SLOT_H
+        const clamped  = Math.max(0, Math.min(TOTAL_H - dragRef.current.height, snapped))
+        dragRef.current.currentTop = clamped
+        dragRef.current.currentDi  = targetDi
+        setDragState(prev => prev ? { ...prev, top: clamped, di: targetDi } : null)
+      }
+
+      const onUp = () => {
+        window.removeEventListener('mousemove', onMove)
+        window.removeEventListener('mouseup',   onUp)
+        window.removeEventListener('touchmove', onMove)
+        window.removeEventListener('touchend',  onUp)
+
+        if (!dragRef.current?.didDrag) { dragRef.current = null; setDragState(null); return }
+
+        justDraggedRef.current = true
+        setTimeout(() => { justDraggedRef.current = false }, 100)
+
+        const { task, currentTop, currentDi } = dragRef.current
+        const slotIndex  = Math.min(Math.floor(currentTop / SLOT_H), TIME_SLOTS.length - 1)
+        const slot       = TIME_SLOTS[slotIndex]
+        const newStart   = slotToTime(slot.h, slot.m)
+        const dur        = task.duration || 60
+        const newEndMin  = slot.h * 60 + slot.m + dur
+        const newEnd     = newEndMin <= 1440
+          ? slotToTime(Math.floor(newEndMin / 60), newEndMin % 60)
+          : '23:59'
+        onTaskSchedule(task.id, dateToStr(days[currentDi]), newStart, newEnd)
+        dragRef.current = null
+        setDragState(null)
+      }
+
+      window.addEventListener('mousemove', onMove)
+      window.addEventListener('mouseup',   onUp)
+      window.addEventListener('touchmove', onMove, { passive: false })
+      window.addEventListener('touchend',  onUp)
+    }
+
+    if (isTouch) {
+      earlyMoveListener = (moveEv) => {
+        const cx = moveEv.touches[0].clientX
+        const cy = moveEv.touches[0].clientY
+        if (Math.hypot(cx - startX, cy - startY) > 8) cancelEarly()
+      }
+      holdTimer = setTimeout(activateDrag, 600)
+      window.addEventListener('touchmove', earlyMoveListener, { passive: true })
+      window.addEventListener('touchend',  cancelEarly)
+    } else {
+      earlyMoveListener = (moveEv) => {
+        if (Math.hypot(moveEv.clientX - startX, moveEv.clientY - startY) > 5) {
+          window.removeEventListener('mousemove', earlyMoveListener)
+          activateDrag(moveEv.clientX, moveEv.clientY)
+        }
+      }
+      window.addEventListener('mousemove', earlyMoveListener)
+      window.addEventListener('mouseup',   cancelEarly)
+    }
+  }
+
+  // ── Task DnD (panel → calendar) ───────────────────────────────────────────
+
+  const handleTaskDragOver = (e, di) => {
+    // Check dataTransfer types synchronously — React state may not have updated yet
+    // when the first dragover fires right after dragstart.
+    if (!e.dataTransfer.types.includes('taskid')) return
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+    // getBoundingClientRect() already accounts for scroll, so do NOT add scrollTop.
+    const rect    = e.currentTarget.getBoundingClientRect()
+    const relY    = e.clientY - rect.top
+    const slotIdx = Math.max(0, Math.min(TIME_SLOTS.length - 1, Math.floor(relY / SLOT_H)))
+    const dur     = draggingTask?.duration || 60
+    const height  = Math.max(SLOT_H, (dur / 30) * SLOT_H)
+    setDropSlot({ di, top: slotIdx * SLOT_H, height })
+  }
+
+  const handleTaskDragLeave = (e, di) => {
+    if (!e.currentTarget.contains(e.relatedTarget)) {
+      setDropSlot(ds => (ds?.di === di ? null : ds))
+    }
+  }
+
+  const handleTaskDrop = (e, di, dateStr) => {
+    if (!draggingTask) return
+    e.preventDefault()
+    // Use the ghost slot if available; fall back to drop-event position.
+    let slot = dropSlot?.di === di ? dropSlot : null
+    if (!slot) {
+      const rect    = e.currentTarget.getBoundingClientRect()
+      const relY    = e.clientY - rect.top
+      const slotIdx = Math.max(0, Math.min(TIME_SLOTS.length - 1, Math.floor(relY / SLOT_H)))
+      const dur     = draggingTask.duration || 60
+      slot = { di, top: slotIdx * SLOT_H, height: Math.max(SLOT_H, (dur / 30) * SLOT_H) }
+    }
+    const slotIdx = Math.floor(slot.top / SLOT_H)
+    const { h, m } = TIME_SLOTS[slotIdx]
+    const start   = slotToTime(h, m)
+    const dur     = draggingTask.duration || 60
+    const endMin  = h * 60 + m + dur
+    const end     = endMin <= 1440 ? slotToTime(Math.floor(endMin / 60), endMin % 60) : '23:59'
+    onTaskSchedule(draggingTask.id, dateStr, start, end)
+    setDropSlot(null)
+  }
+
+  // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
     <div className="week-grid-wrap">
@@ -366,10 +602,16 @@ function WeekGrid({ days, events, onCellClick, onEventClick, onEventToggle, onEv
         <div className="wh-corner" />
         {days.map((day, i) => {
           const isToday = dateToStr(day) === today
+          const dayTasks = tasks.filter(t => t.scheduled_date === dateToStr(day) && !t.done)
           return (
             <div key={i} className={`wh-day${isToday ? ' wh-today' : ''}`}>
               <span className="wh-dow">{DAY_SHORT[day.getDay()]}</span>
               <span className="wh-num">{day.getDate()}</span>
+              {dayTasks.length > 0 && (
+                <span className="wh-task-dot" title={`${dayTasks.length} task${dayTasks.length > 1 ? 's' : ''}`}>
+                  {dayTasks.length}
+                </span>
+              )}
             </div>
           )
         })}
@@ -379,7 +621,7 @@ function WeekGrid({ days, events, onCellClick, onEventClick, onEventToggle, onEv
       <div className="week-body" ref={bodyRef}>
         <div className="week-inner" ref={weekInnerRef}>
 
-          {/* Time-label column */}
+          {/* Time label column */}
           <div className="time-col" style={{ position: 'relative' }}>
             {TIME_SLOTS.map(({ h, m }, i) => (
               <div key={i} className="time-label">{slotLabel(h, m)}</div>
@@ -397,16 +639,20 @@ function WeekGrid({ days, events, onCellClick, onEventClick, onEventToggle, onEv
 
           {/* One column per day */}
           {days.map((day, di) => {
-            const dateStr = dateToStr(day)
-            const isToday = dateStr === today
-            const dayEvs  = events.filter(e => e.date === dateStr)
+            const dateStr  = dateToStr(day)
+            const isToday  = dateStr === today
+            const dayEvs   = events.filter(e => e.date === dateStr)
+            const dayTasks = tasks.filter(t => t.scheduled_date === dateStr && t.scheduled_start)
 
             return (
               <div
                 key={di}
-                className={`day-col${isToday ? ' day-today' : ''}`}
+                className={`day-col${isToday ? ' day-today' : ''}${draggingTask ? ' day-col-droppable' : ''}`}
                 style={{ height: TOTAL_H }}
                 onClick={e => handleColClick(e, dateStr)}
+                onDragOver={e => handleTaskDragOver(e, di)}
+                onDragLeave={e => handleTaskDragLeave(e, di)}
+                onDrop={e => handleTaskDrop(e, di, dateStr)}
               >
                 {TIME_SLOTS.map(({ m }, i) => (
                   <div key={i} className={m === 0 ? 'g-hour' : 'g-half'} style={{ top: i * SLOT_H }} />
@@ -418,18 +664,23 @@ function WeekGrid({ days, events, onCellClick, onEventClick, onEventToggle, onEv
                   </div>
                 )}
 
-                {/* Drag overlay */}
+                {/* Drag overlay (event or calendar task) */}
                 {dragState && dragState.di === di && (
-                  <div
-                    className="cal-event ce-drag-overlay"
-                    style={{ top: dragState.top, height: dragState.height, background: `${dragState.color}40`, borderLeftColor: dragState.color }}
-                  >
-                    <div className="ce-body">
-                      <span className="ce-title">{dragState.title}</span>
+                  dragState.isTask ? (
+                    <div className="cal-task ce-drag-overlay" style={{ top: dragState.top, height: dragState.height }}>
+                      <div className="ct-body"><span className="ct-title">{dragState.title}</span></div>
                     </div>
-                  </div>
+                  ) : (
+                    <div
+                      className="cal-event ce-drag-overlay"
+                      style={{ top: dragState.top, height: dragState.height, background: `${dragState.color}40`, borderLeftColor: dragState.color }}
+                    >
+                      <div className="ce-body"><span className="ce-title">{dragState.title}</span></div>
+                    </div>
+                  )
                 )}
 
+                {/* Event blocks */}
                 {dayEvs.map(ev => {
                   const m = getEventMetrics(ev)
                   if (!m || m.top < 0) return null
@@ -471,6 +722,54 @@ function WeekGrid({ days, events, onCellClick, onEventClick, onEventToggle, onEv
                     </div>
                   )
                 })}
+
+                {/* Scheduled task blocks */}
+                {dayTasks.map(task => {
+                  const m = getEventMetrics({ startTime: task.scheduled_start, endTime: task.scheduled_end })
+                  if (!m || m.top < 0) return null
+                  const taskDragging = dragState?.taskId === task.id
+                  return (
+                    <div
+                      key={task.id}
+                      className={`cal-task${task.done ? ' ct-done' : ''}${taskDragging ? ' ce-dragging' : ''}`}
+                      style={{ top: m.top, height: m.height, cursor: task.done ? 'default' : 'grab' }}
+                      onMouseDown={e => { if (!task.done) { e.stopPropagation(); handleTaskCalDragStart(e, task, di) } }}
+                      onTouchStart={e => { if (!task.done) { e.stopPropagation(); handleTaskCalDragStart(e, task, di) } }}
+                      onClick={e => { e.stopPropagation(); if (!justDraggedRef.current) onTaskClick(task) }}
+                    >
+                      <button
+                        className={`ct-check${task.done ? ' ct-check-on' : ''}`}
+                        onMouseDown={e => e.stopPropagation()}
+                        onClick={e => {
+                          e.stopPropagation()
+                          onTaskToggle(task.id, !task.done)
+                        }}
+                        aria-label={task.done ? 'Mark undone' : 'Mark done'}
+                      >
+                        {task.done && (
+                          <svg viewBox="0 0 10 10" fill="none" stroke="#000" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                            <polyline points="1.5 5 4 7.5 8.5 2.5"/>
+                          </svg>
+                        )}
+                      </button>
+                      <div className="ct-body">
+                        <span className="ct-title">{task.title}</span>
+                        {m.height > SLOT_H * 0.75 && task.scheduled_start && (
+                          <span className="ct-time">
+                            {fmt12(task.scheduled_start)}{task.scheduled_end ? ` – ${fmt12(task.scheduled_end)}` : ''}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })}
+
+                {/* Task drag-drop ghost */}
+                {draggingTask && dropSlot && dropSlot.di === di && (
+                  <div className="cal-task-ghost" style={{ top: dropSlot.top, height: dropSlot.height }}>
+                    <span className="ct-ghost-label">{draggingTask.title}</span>
+                  </div>
+                )}
               </div>
             )
           })}
@@ -515,7 +814,6 @@ function EventModal({ initial, onSave, onDelete, onClose }) {
     <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
       <div className="modal-sheet">
         <div className="modal-handle" />
-
         <div className="modal-header">
           <span className="modal-title">{isEdit ? 'Edit Event' : 'New Event'}</span>
           <button className="modal-close" onClick={onClose}>
@@ -545,21 +843,11 @@ function EventModal({ initial, onSave, onDelete, onClose }) {
           <div className="form-row">
             <div className="form-group">
               <label className="form-label">Start</label>
-              <input
-                className="form-input"
-                type="time"
-                value={form.startTime}
-                onChange={e => handleStartChange(e.target.value)}
-              />
+              <input className="form-input" type="time" value={form.startTime} onChange={e => handleStartChange(e.target.value)} />
             </div>
             <div className="form-group">
               <label className="form-label">End</label>
-              <input
-                className="form-input"
-                type="time"
-                value={form.endTime}
-                onChange={e => set('endTime', e.target.value)}
-              />
+              <input className="form-input" type="time" value={form.endTime} onChange={e => set('endTime', e.target.value)} />
             </div>
           </div>
 
@@ -574,6 +862,11 @@ function EventModal({ initial, onSave, onDelete, onClose }) {
               })()}
             </div>
           )}
+
+          <div className="form-group">
+            <label className="form-label">Location <span className="form-optional">(optional)</span></label>
+            <input className="form-input" value={form.location || ''} onChange={e => set('location', e.target.value)} placeholder="Where?" />
+          </div>
 
           <div className="form-group">
             <label className="form-label">Color</label>
@@ -611,14 +904,231 @@ function EventModal({ initial, onSave, onDelete, onClose }) {
   )
 }
 
+// ─── TaskModal ────────────────────────────────────────────────────────────────
+
+const PRIORITY_COLOR_M = { high: '#ff3864', medium: '#ffe600', low: '#00ff9d' }
+const PRIORITY_LABEL_M = { high: 'High', medium: 'Med', low: 'Low' }
+
+function TaskModal({ task, onSave, onDelete, onClose }) {
+  const [title,     setTitle]     = useState(task.title || '')
+  const [prio,      setPrio]      = useState(task.priority || 'medium')
+  const [due,       setDue]       = useState(task.due_date || '')
+  const [sDate,     setSDate]     = useState(task.scheduled_date || '')
+  const [start,     setStart]     = useState(task.scheduled_start || '')
+  const [end,       setEnd]       = useState(task.scheduled_end || '')
+  const [dur,       setDur]       = useState(task.duration ? String(task.duration) : '')
+  const [notes,     setNotes]     = useState(task.notes || '')
+  const [checklist, setChecklist] = useState(task.checklist || [])
+  const [newItem,   setNewItem]   = useState('')
+  const [error,     setError]     = useState('')
+
+  const addItem = () => {
+    if (!newItem.trim()) return
+    const id = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2)
+    setChecklist(cl => [...cl, { id, text: newItem.trim(), done: false }])
+    setNewItem('')
+  }
+  const toggleItem = (id) => setChecklist(cl => cl.map(c => c.id === id ? { ...c, done: !c.done } : c))
+  const removeItem = (id) => setChecklist(cl => cl.filter(c => c.id !== id))
+
+  const handleStartChange = (val) => {
+    setStart(val)
+    if (val && (!end || end <= val)) {
+      const [h, m] = val.split(':').map(Number)
+      const eh = h + 1
+      setEnd(eh < 24 ? slotToTime(eh, m) : '23:59')
+    }
+    // Auto-compute duration
+    if (val && end && end > val) {
+      const [sh, sm] = val.split(':').map(Number)
+      const [eh, em] = end.split(':').map(Number)
+      setDur(String((eh * 60 + em) - (sh * 60 + sm)))
+    }
+  }
+
+  const handleEndChange = (val) => {
+    setEnd(val)
+    if (start && val && val > start) {
+      const [sh, sm] = start.split(':').map(Number)
+      const [eh, em] = val.split(':').map(Number)
+      setDur(String((eh * 60 + em) - (sh * 60 + sm)))
+    }
+  }
+
+  const handleDurChange = (val) => {
+    setDur(val)
+    const mins = parseInt(val)
+    if (start && mins > 0) {
+      const [sh, sm] = start.split(':').map(Number)
+      const total = sh * 60 + sm + mins
+      const eh = Math.floor(total / 60) % 24
+      const em = total % 60
+      setEnd(`${String(eh).padStart(2, '0')}:${String(em).padStart(2, '0')}`)
+    }
+  }
+
+  const handleSave = () => {
+    if (!title.trim()) { setError('Title is required'); return }
+    onSave(task.id, {
+      title:           title.trim(),
+      priority:        prio,
+      due_date:        due || null,
+      scheduled_date:  sDate || null,
+      scheduled_start: start || null,
+      scheduled_end:   end || null,
+      duration:        dur ? parseInt(dur) : 0,
+      notes:           notes || null,
+      checklist,
+    })
+    onClose()
+  }
+
+  const pColor = PRIORITY_COLOR_M[prio]
+
+  return createPortal(
+    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="modal-sheet">
+        <div className="modal-handle" />
+        <div className="modal-header">
+          <span className="modal-title">Edit Task</span>
+          <button className="modal-close" onClick={onClose}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+              <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+            </svg>
+          </button>
+        </div>
+
+        <div className="modal-body">
+          <div className="form-group">
+            <label className="form-label">Title</label>
+            <input
+              className={`form-input${error ? ' input-error' : ''}`}
+              value={title}
+              onChange={e => { setTitle(e.target.value); setError('') }}
+              placeholder="Task name…"
+            />
+            {error && <span className="form-error">{error}</span>}
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">Priority</label>
+            <div className="tm-prio-row">
+              {['low','medium','high'].map(p => (
+                <button
+                  key={p}
+                  className={`tm-prio-btn${prio === p ? ' tm-prio-on' : ''}`}
+                  style={{ '--tmc': PRIORITY_COLOR_M[p] }}
+                  onClick={() => setPrio(p)}
+                >
+                  {PRIORITY_LABEL_M[p]}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">Due Date <span className="form-optional">(optional)</span></label>
+            <input className="form-input" type="date" value={due} onChange={e => setDue(e.target.value)} />
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">Scheduled Date <span className="form-optional">(optional)</span></label>
+            <input className="form-input" type="date" value={sDate} onChange={e => setSDate(e.target.value)} />
+          </div>
+
+          <div className="form-row">
+            <div className="form-group">
+              <label className="form-label">Start</label>
+              <input className="form-input" type="time" value={start} onChange={e => handleStartChange(e.target.value)} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">End</label>
+              <input className="form-input" type="time" value={end} onChange={e => handleEndChange(e.target.value)} />
+            </div>
+          </div>
+
+          {start && end && end > start && (
+            <div className="duration-hint">
+              {(() => {
+                const [sh, sm] = start.split(':').map(Number)
+                const [eh, em] = end.split(':').map(Number)
+                const mins = (eh * 60 + em) - (sh * 60 + sm)
+                const h = Math.floor(mins / 60), m = mins % 60
+                return h > 0 ? `${h}h${m > 0 ? ` ${m}m` : ''}` : `${m}m`
+              })()}
+            </div>
+          )}
+
+          <div className="form-group">
+            <label className="form-label">Duration (mins) <span className="form-optional">(optional)</span></label>
+            <input className="form-input" type="number" min="0" value={dur}
+              onChange={e => handleDurChange(e.target.value)} placeholder="e.g. 60" />
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">Notes <span className="form-optional">(optional)</span></label>
+            <textarea
+              className="form-input form-textarea"
+              value={notes}
+              onChange={e => setNotes(e.target.value)}
+              placeholder="Add notes…"
+              rows={3}
+            />
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">Checklist</label>
+            <div className="tm-checklist">
+              {checklist.map(item => (
+                <div key={item.id} className="tm-cl-item">
+                  <button className={`tm-cl-check${item.done ? ' tm-cl-checked' : ''}`} onClick={() => toggleItem(item.id)}>
+                    {item.done && <svg viewBox="0 0 10 8" fill="none" stroke="#000" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="1,4 4,7 9,1"/></svg>}
+                  </button>
+                  <span className={`tm-cl-text${item.done ? ' tm-cl-text-done' : ''}`}>{item.text}</span>
+                  <button className="tm-cl-del" onClick={() => removeItem(item.id)}>✕</button>
+                </div>
+              ))}
+              <div className="tm-cl-add-row">
+                <input
+                  className="tm-cl-input"
+                  value={newItem}
+                  placeholder="Add item…"
+                  onChange={e => setNewItem(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') addItem() }}
+                />
+                <button className="tm-cl-add-btn" onClick={addItem}>+</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="modal-footer">
+          <button className="btn-delete" onClick={() => { onDelete(task.id); onClose() }}>Delete</button>
+          {task.scheduled_date && (
+            <button className="btn-unschedule" onClick={() => {
+              onSave(task.id, {
+                title, priority: prio, due_date: due || null,
+                scheduled_date: null, scheduled_start: null, scheduled_end: null,
+                duration: dur ? parseInt(dur) : 0, notes: notes || null,
+              })
+              onClose()
+            }}>Unschedule</button>
+          )}
+          <button className="btn-save" onClick={handleSave}>Save Changes</button>
+        </div>
+      </div>
+    </div>,
+    document.body
+  )
+}
+
 // ─── Month Grid ───────────────────────────────────────────────────────────────
 
-function MonthGrid({ monthOffset, events, onDayClick, onEventClick }) {
+function MonthGrid({ monthOffset, events, tasks, onDayClick, onEventClick }) {
   const today = todayStr()
   const now   = new Date()
   const month = new Date(now.getFullYear(), now.getMonth() + monthOffset, 1)
 
-  // Build grid starting on Monday of first week
   const dow   = month.getDay()
   const start = new Date(month)
   start.setDate(month.getDate() + (dow === 0 ? -6 : 1 - dow))
@@ -630,7 +1140,6 @@ function MonthGrid({ monthOffset, events, onDayClick, onEventClick }) {
       return day
     })
   )
-  // Drop 6th row if all days are outside current month
   const rows = weeks[5].every(d => d.getMonth() !== month.getMonth())
     ? weeks.slice(0, 5) : weeks
 
@@ -644,10 +1153,11 @@ function MonthGrid({ monthOffset, events, onDayClick, onEventClick }) {
       {rows.map((week, wi) => (
         <div key={wi} className="month-week">
           {week.map((day, di) => {
-            const ds   = dateToStr(day)
-            const isToday   = ds === today
-            const inMonth   = day.getMonth() === month.getMonth()
-            const dayEvs    = events.filter(e => e.date === ds)
+            const ds      = dateToStr(day)
+            const isToday = ds === today
+            const inMonth = day.getMonth() === month.getMonth()
+            const dayEvs  = events.filter(e => e.date === ds)
+            const dayTasks = tasks.filter(t => t.scheduled_date === ds && !t.done)
             return (
               <div
                 key={di}
@@ -656,7 +1166,7 @@ function MonthGrid({ monthOffset, events, onDayClick, onEventClick }) {
               >
                 <span className="month-day-num">{day.getDate()}</span>
                 <div className="month-evs">
-                  {dayEvs.slice(0, 3).map(ev => (
+                  {dayEvs.slice(0, 2).map(ev => (
                     <div
                       key={ev.id}
                       className={`month-ev${ev.done ? ' month-ev-done' : ''}`}
@@ -666,8 +1176,17 @@ function MonthGrid({ monthOffset, events, onDayClick, onEventClick }) {
                       {ev.title}
                     </div>
                   ))}
-                  {dayEvs.length > 3 && (
-                    <div className="month-ev-more">+{dayEvs.length - 3} more</div>
+                  {dayTasks.slice(0, 1).map(task => (
+                    <div
+                      key={task.id}
+                      className="month-ev month-task-ev"
+                      onClick={e => { e.stopPropagation(); onEventClick(task) }}
+                    >
+                      {task.title}
+                    </div>
+                  ))}
+                  {(dayEvs.length + dayTasks.length) > 3 && (
+                    <div className="month-ev-more">+{dayEvs.length + dayTasks.length - 3} more</div>
                   )}
                 </div>
               </div>
@@ -683,12 +1202,43 @@ function MonthGrid({ monthOffset, events, onDayClick, onEventClick }) {
 
 export default function Schedule() {
   const { events, addEvent, updateEvent, deleteEvent } = useEvents()
+  const { tasks, addTask, updateTask, deleteTask }     = useTasks()
+
   const [isMobile,    setIsMobile]    = useState(() => window.innerWidth < 768)
   const [view,        setView]        = useState(() => window.innerWidth < 768 ? 'day' : 'week')
   const [weekOffset,  setWeekOffset]  = useState(0)
   const [dayOffset,   setDayOffset]   = useState(0)
   const [monthOffset, setMonthOffset] = useState(0)
+
+  // Event modal (create / edit events)
   const [modal, setModal] = useState(null)
+  // Task modal (edit tasks clicked from calendar)
+  const [taskModal, setTaskModal] = useState(null)
+
+  // Panel state
+  const [panelMode,    setPanelMode]    = useState('default') // 'default' | 'task-detail' | 'create-task'
+  const [selectedTask, setSelectedTask] = useState(null)
+
+  // Task being dragged from panel to calendar
+  const [draggingTask, setDraggingTask] = useState(null)
+
+  // Mobile planner bottom sheet
+  const [showPlanner, setShowPlanner] = useState(false)
+  const sheetRef  = useRef(null)
+  const dragY     = useRef(null)
+
+  const closePlanner = useCallback(() => setShowPlanner(false), [])
+
+  // Swipe-down to close the sheet
+  const onSheetTouchStart = useCallback((e) => {
+    dragY.current = e.touches[0].clientY
+  }, [])
+  const onSheetTouchMove = useCallback((e) => {
+    if (dragY.current === null) return
+    const dy = e.touches[0].clientY - dragY.current
+    if (dy > 60) { dragY.current = null; closePlanner() }
+  }, [closePlanner])
+  const onSheetTouchEnd = useCallback(() => { dragY.current = null }, [])
 
   useEffect(() => {
     const handler = () => {
@@ -755,8 +1305,8 @@ export default function Schedule() {
     ? (() => { const now = new Date(); const m = new Date(now.getFullYear(), now.getMonth() + monthOffset, 1); return dateToStr(m) })()
     : dateToStr(days[0])
 
-  const openAdd  = (date, startTime, endTime) =>
-    setModal({ initial: { date, startTime: startTime || '', endTime: endTime || '', title: '', color: COLOR_PRESETS[0], notes: '' } })
+  const openAdd    = (date, startTime, endTime) =>
+    setModal({ initial: { date, startTime: startTime || '', endTime: endTime || '', title: '', color: COLOR_PRESETS[0], notes: '', location: '' } })
   const openEdit   = (ev) => setModal({ initial: ev })
   const closeModal = ()   => setModal(null)
 
@@ -766,61 +1316,182 @@ export default function Schedule() {
     closeModal()
   }
 
+  const handleTaskClick = (task) => {
+    // Open the task edit modal (same UX as event click)
+    const fresh = tasks.find(t => t.id === task.id) || task
+    setTaskModal(fresh)
+  }
+
+  const handleTaskSchedule = (taskId, date, start, end) => {
+    updateTask(taskId, { scheduled_date: date, scheduled_start: start, scheduled_end: end })
+    // Reflect in selectedTask if open
+    if (selectedTask?.id === taskId) {
+      setSelectedTask(t => ({ ...t, scheduled_date: date, scheduled_start: start, scheduled_end: end }))
+    }
+  }
+
+  const handleTaskToggle = (taskId, done) => {
+    updateTask(taskId, { done, done_at: done ? new Date().toISOString() : null })
+    if (selectedTask?.id === taskId) setSelectedTask(t => ({ ...t, done }))
+  }
+
+  const handleTaskUpdate = (id, d) => {
+    updateTask(id, d)
+    if (selectedTask?.id === id) setSelectedTask(t => ({ ...t, ...d }))
+  }
+
+  const handleTaskDelete = (id) => {
+    deleteTask(id)
+    if (selectedTask?.id === id) { setSelectedTask(null); setPanelMode('default') }
+  }
+
+  const handleDateClick = (dateStr) => {
+    const picked = new Date(dateStr + 'T00:00:00')
+    const today  = new Date(); today.setHours(0, 0, 0, 0)
+    if (view === 'week') {
+      const toMon = (d) => d.getDay() === 0 ? -6 : 1 - d.getDay()
+      const pickedMon = new Date(picked); pickedMon.setDate(picked.getDate() + toMon(picked))
+      const thisMon   = new Date(today);  thisMon.setDate(today.getDate() + toMon(today))
+      setWeekOffset(Math.round((pickedMon - thisMon) / (7 * 86400000)))
+    } else if (view === 'day') {
+      setDayOffset(Math.round((picked - today) / 86400000))
+    } else {
+      const now = new Date()
+      setMonthOffset((picked.getFullYear() - now.getFullYear()) * 12 + picked.getMonth() - now.getMonth())
+    }
+  }
+
   return (
     <div className="schedule-page">
-      <div className="week-nav">
-        <button className="wnav-btn" onClick={goPrev}>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="15 18 9 12 15 6"/>
-          </svg>
-        </button>
-        <div className="wnav-center">
-          <div className="wnav-date-wrap">
-            <span className="wnav-range wnav-date-btn">
-              {navLabel()}
-              <svg className="wnav-cal-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
-              </svg>
-            </span>
-            <input type="date" className="wnav-date-input" value={pickerValue} onChange={handleDatePick} />
+      <div className="sched-layout">
+
+        {/* ── Task panel (desktop only) ── */}
+        {!isMobile && (
+          <div className="sched-tasks-panel">
+            <TaskPanel
+              tasks={tasks}
+              events={events}
+              panelMode={panelMode}
+              selectedTask={selectedTask}
+              onPanelMode={setPanelMode}
+              onSelectTask={handleTaskClick}
+              onAddTask={addTask}
+              onUpdateTask={handleTaskUpdate}
+              onDeleteTask={handleTaskDelete}
+              onTaskToggle={handleTaskToggle}
+              onDragStart={setDraggingTask}
+              onDragEnd={() => setDraggingTask(null)}
+              onDateClick={handleDateClick}
+              isAtToday={isAtToday}
+              onGoToday={goToday}
+            />
           </div>
-          {!isAtToday && (
-            <button className="wnav-today" onClick={goToday}>Today</button>
+        )}
+
+        {/* ── Calendar panel ── */}
+        <div className="sched-cal-panel">
+          <div className="week-nav">
+            <button className="wnav-btn" onClick={goPrev}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="15 18 9 12 15 6"/>
+              </svg>
+            </button>
+            <div className="wnav-center">
+              <div className="wnav-date-wrap">
+                <span className="wnav-range wnav-date-btn">
+                  {navLabel()}
+                  <svg className="wnav-cal-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
+                  </svg>
+                </span>
+                <input type="date" className="wnav-date-input" value={pickerValue} onChange={handleDatePick} />
+              </div>
+              {!isAtToday && (
+                <button className="wnav-today" onClick={goToday}>Today</button>
+              )}
+            </div>
+            <button className="wnav-btn" onClick={goNext}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="9 18 15 12 9 6"/>
+              </svg>
+            </button>
+          </div>
+
+          <div className="view-toggle">
+            {(isMobile ? ['day','month'] : ['day','week','month']).map(v => (
+              <button key={v} className={`vt-btn${view === v ? ' vt-active' : ''}`} onClick={() => setView(v)}>
+                {v.charAt(0).toUpperCase() + v.slice(1)}
+              </button>
+            ))}
+            {isMobile && (
+              <button className="vt-btn vt-planner-btn" onClick={() => setShowPlanner(true)}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/>
+                  <circle cx="3" cy="6" r="1" fill="currentColor"/><circle cx="3" cy="12" r="1" fill="currentColor"/><circle cx="3" cy="18" r="1" fill="currentColor"/>
+                </svg>
+                Planner
+              </button>
+            )}
+          </div>
+
+          {view === 'month' ? (
+            <MonthGrid
+              monthOffset={monthOffset}
+              events={events}
+              tasks={tasks}
+              onDayClick={handleMonthDayClick}
+              onEventClick={openEdit}
+            />
+          ) : (
+            <WeekGrid
+              days={days}
+              events={events}
+              tasks={tasks}
+              draggingTask={draggingTask}
+              onCellClick={openAdd}
+              onEventClick={openEdit}
+              onEventToggle={(id, done) => updateEvent(id, { done })}
+              onEventUpdate={updateEvent}
+              onTaskClick={handleTaskClick}
+              onTaskSchedule={handleTaskSchedule}
+              onTaskToggle={handleTaskToggle}
+            />
           )}
         </div>
-        <button className="wnav-btn" onClick={goNext}>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="9 18 15 12 9 6"/>
-          </svg>
-        </button>
+
       </div>
 
-      <div className="view-toggle">
-        {(isMobile ? ['day','month'] : ['day','week','month']).map(v => (
-          <button key={v} className={`vt-btn${view === v ? ' vt-active' : ''}`} onClick={() => setView(v)}>
-            {v.charAt(0).toUpperCase() + v.slice(1)}
-          </button>
-        ))}
-      </div>
-
-      {view === 'month' ? (
-        <MonthGrid
-          monthOffset={monthOffset}
-          events={events}
-          onDayClick={handleMonthDayClick}
-          onEventClick={openEdit}
-        />
-      ) : (
-        <WeekGrid
-          days={days}
-          events={events}
-          onCellClick={openAdd}
-          onEventClick={openEdit}
-          onEventToggle={(id, done) => updateEvent(id, { done })}
-          onEventUpdate={updateEvent}
-        />
+      {/* ── Mobile planner bottom sheet ── */}
+      {isMobile && showPlanner && createPortal(
+        <>
+          <div className="planner-overlay" onClick={closePlanner} />
+          <div
+            ref={sheetRef}
+            className="planner-sheet"
+            onTouchStart={onSheetTouchStart}
+            onTouchMove={onSheetTouchMove}
+            onTouchEnd={onSheetTouchEnd}
+          >
+            <div className="planner-handle-bar">
+              <span className="planner-handle" />
+            </div>
+            <TaskPanel
+              tasks={tasks}
+              events={events}
+              onAddTask={addTask}
+              onUpdateTask={handleTaskUpdate}
+              onDeleteTask={handleTaskDelete}
+              onTaskToggle={handleTaskToggle}
+              onDragStart={setDraggingTask}
+              onDragEnd={() => setDraggingTask(null)}
+              onDateClick={(d) => { handleDateClick(d); closePlanner() }}
+            />
+          </div>
+        </>,
+        document.body
       )}
 
+      {/* FAB — add event */}
       <button className="fab" onClick={() => openAdd(todayStr(), '', '')} aria-label="Add event">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
           <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
@@ -833,6 +1504,15 @@ export default function Schedule() {
           onSave={handleSave}
           onDelete={(id) => { deleteEvent(id); closeModal() }}
           onClose={closeModal}
+        />
+      )}
+
+      {taskModal && (
+        <TaskModal
+          task={taskModal}
+          onSave={handleTaskUpdate}
+          onDelete={handleTaskDelete}
+          onClose={() => setTaskModal(null)}
         />
       )}
     </div>

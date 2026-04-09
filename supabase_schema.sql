@@ -94,18 +94,82 @@ create table if not exists settings (
 );
 
 
--- ── 6. Events (Schedule tab) ──────────────────────────────────────────────────
+-- ── 6. Events (Schedule tab calendar) ────────────────────────────────────────
+-- Hard reset: drop and recreate cleanly.
 
-create table if not exists events (
-  id         text primary key,
+drop table if exists events cascade;
+
+create table events (
+  id         uuid primary key default gen_random_uuid(),
   title      text not null,
-  date       text,
-  start_time text,
-  end_time   text,
-  color      text,
-  category   text,
-  notes      text
+  date       date not null,              -- YYYY-MM-DD (Pacific Time)
+  start_time text,                       -- HH:MM (24-hour)
+  end_time   text,                       -- HH:MM (24-hour)
+  color      text,                       -- hex color string e.g. '#00e5ff'
+  location   text,
+  notes      text,
+  created_at timestamptz default now()
 );
+
+create index if not exists events_date_idx on events (date);
+
+alter table events disable row level security;
+
+
+-- ── 7. Tasks ──────────────────────────────────────────────────────────────────
+-- Hard reset: drop and recreate cleanly.
+
+drop table if exists tasks cascade;
+
+create table tasks (
+  id               uuid primary key default gen_random_uuid(),
+  title            text not null,
+  priority         text not null default 'medium'   check (priority in ('high','medium','low')),
+  due_date         date,                             -- optional deadline (Pacific Time)
+  duration         integer not null default 60,      -- estimated minutes
+  notes            text,
+  done             boolean not null default false,
+  done_at          timestamptz,
+  checklist        jsonb not null default '[]'::jsonb,  -- [{id,text,done}]
+  scheduled_date   date,                             -- date dropped onto calendar
+  scheduled_start  text,                             -- HH:MM when dragged to a slot
+  scheduled_end    text,                             -- HH:MM auto-computed from duration
+  created_at       timestamptz default now()
+);
+
+create index if not exists tasks_created_idx   on tasks (created_at desc);
+create index if not exists tasks_scheduled_idx on tasks (scheduled_date);
+create index if not exists tasks_due_idx       on tasks (due_date);
+
+alter table tasks disable row level security;
+
+
+-- ── 8. Habits ─────────────────────────────────────────────────────────────────
+-- Hard reset: drop and recreate cleanly.
+
+drop table if exists habit_logs cascade;
+drop table if exists habits    cascade;
+
+create table habits (
+  id         uuid primary key default gen_random_uuid(),
+  name       text not null,
+  goal       integer not null default 7 check (goal between 1 and 7),  -- days/week target
+  created_at timestamptz default now()
+);
+
+create table habit_logs (
+  id         uuid primary key default gen_random_uuid(),
+  habit_id   uuid not null references habits (id) on delete cascade,
+  log_date   date not null,
+  done       boolean not null default true,
+  unique (habit_id, log_date)
+);
+
+create index if not exists habit_logs_habit_idx on habit_logs (habit_id);
+create index if not exists habit_logs_date_idx  on habit_logs (log_date desc);
+
+alter table habits     disable row level security;
+alter table habit_logs disable row level security;
 
 
 -- ─────────────────────────────────────────────────────────────────────────────
@@ -121,7 +185,6 @@ alter table bank_accounts      disable row level security;
 alter table bank_transactions  disable row level security;
 alter table balance_snapshots  disable row level security;
 alter table settings           disable row level security;
-alter table events             disable row level security;
 
 
 -- ── Migration: add SnapTrade columns (run if table already exists) ────────────
