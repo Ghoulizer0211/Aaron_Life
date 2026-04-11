@@ -164,19 +164,6 @@ function useEvents() {
       sb(supabase.from('events').select('*').order('date'))
         .then(({ data } = {}) => { if (Array.isArray(data)) setEvents(data.map(evFromDb)) })
 
-      let channel
-      try {
-        channel = supabase.channel('events-sync')
-          .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'events' },
-            ({ new: row }) => setEvents(p => p.some(e => e.id === row.id) ? p : [...p, evFromDb(row)]))
-          .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'events' },
-            ({ new: row }) => setEvents(p => p.map(e => e.id === row.id ? evFromDb(row) : e)))
-          .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'events' },
-            ({ old: row }) => setEvents(p => p.filter(e => e.id !== row.id)))
-          .subscribe()
-      } catch (_) {}
-
-      return () => { if (channel) try { supabase.removeChannel(channel) } catch (_) {} }
     } else {
       fetch('/api/events')
         .then(r => r.json())
@@ -262,19 +249,6 @@ function useTasks() {
         .then(({ data } = {}) => { if (Array.isArray(data)) setTasks(data) })
     }
 
-    let channel
-    try {
-      channel = supabase.channel('tasks-sync')
-        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'tasks' },
-          ({ new: row }) => setTasks(p => p.some(t => t.id === row.id) ? p : [row, ...p]))
-        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'tasks' },
-          ({ new: row }) => setTasks(p => p.map(t => t.id === row.id ? row : t)))
-        .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'tasks' },
-          ({ old: row }) => setTasks(p => p.filter(t => t.id !== row.id)))
-        .subscribe()
-    } catch (_) {}
-
-    return () => { if (channel) try { supabase.removeChannel(channel) } catch (_) {} }
   }, [])
 
   const save = (list) => { localStorage.setItem('aaron_tasks', JSON.stringify(list)); return list }
