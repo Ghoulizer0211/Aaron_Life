@@ -55,4 +55,6 @@ html.is-desktop .app-main {
 
 html.is-desktop .app-content {
   padding-bottom: 0;
+  background: var(--bg-primary);
 }
+

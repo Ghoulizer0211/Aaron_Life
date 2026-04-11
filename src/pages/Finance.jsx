@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { supabase, sb } from '../lib/supabase'
+import { SaveBtn, CancelBtn } from '../components/IconButtons'
+import '../components/IconButtons.css'
 import './Page.css'
 import './Finance.css'
 
@@ -683,8 +685,8 @@ function TxRow({ tx, onCategoryChange, accountLabel }) {
                 autoFocus
               />
               <div className="tx-note-actions">
-                <button className="tx-note-cancel" onClick={cancelNote}>Cancel</button>
-                <button className="tx-note-save" onClick={saveNote}>Save</button>
+                <CancelBtn onClick={cancelNote} />
+                <SaveBtn onClick={saveNote} />
               </div>
             </div>
           ) : (
@@ -1482,8 +1484,8 @@ function FinBudgetingView({ transactions, lastMonthTransactions = [], month, yea
                 value={budgetInput} autoFocus
                 onChange={e => setBudgetInput(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && saveBudget(budgetInput)} />
-              <button className="fin-budget-save-btn" onClick={() => saveBudget(budgetInput)}>Save</button>
-              <button className="fin-budget-edit-btn" onClick={() => setEditMode(false)}>✕</button>
+              <SaveBtn onClick={() => saveBudget(budgetInput)} />
+              <CancelBtn onClick={() => setEditMode(false)} />
             </div>
           ) : (
             <button className="fin-sa-set-budget-btn" style={{ marginTop:10, width:'100%', fontSize:11 }}
@@ -1743,8 +1745,8 @@ function SpendingDetail({ summary, transactions, lastMonthTransactions = [], mon
             <div className="fin-sa-budget-edit-row">
               <input className="fin-budget-input" type="number" placeholder="e.g. 3000" value={budgetInput}
                 onChange={e => setBudgetInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && saveBudget(budgetInput)} autoFocus />
-              <button className="fin-budget-save-btn" onClick={() => saveBudget(budgetInput)}>Save</button>
-              <button className="fin-budget-edit-btn" onClick={() => setBudgetEditMode(false)}>Cancel</button>
+              <SaveBtn onClick={() => saveBudget(budgetInput)} />
+              <CancelBtn onClick={() => setBudgetEditMode(false)} />
             </div>
           ) : budget > 0 ? (
             <>

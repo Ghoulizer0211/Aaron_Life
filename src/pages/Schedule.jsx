@@ -22,7 +22,9 @@ const LEGACY_COLORS = {
 }
 
 const DAY_SHORT   = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
-const MONTH_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+const MONTH_SHORT    = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+const PRIORITY_COLOR = { high: '#ff3864', medium: '#ffe600', low: '#00ff9d' }
+const PRIORITY_LABEL = { high: 'High', medium: 'Med', low: 'Low' }
 
 const TIME_SLOTS = []
 for (let h = GRID_START; h < GRID_END; h++) {
@@ -140,8 +142,8 @@ function evFromDb(row) {
   }
 }
 
-function evToDb({ startTime, endTime, ...ev }) {
-  return { ...ev, start_time: startTime || null, end_time: endTime || null }
+function evToDb({ id, title, date, color, location, notes, startTime, endTime }) {
+  return { id, title, date, color, location, notes, start_time: startTime || null, end_time: endTime || null }
 }
 
 function useEvents() {
@@ -161,6 +163,17 @@ function useEvents() {
       localStorage.removeItem('aaron_life_events')
       sb(supabase.from('events').select('*').order('date'))
         .then(({ data } = {}) => { if (Array.isArray(data)) setEvents(data.map(evFromDb)) })
+
+      const channel = supabase.channel('events-sync')
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'events' },
+          ({ new: row }) => setEvents(p => p.some(e => e.id === row.id) ? p : [...p, evFromDb(row)]))
+        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'events' },
+          ({ new: row }) => setEvents(p => p.map(e => e.id === row.id ? evFromDb(row) : e)))
+        .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'events' },
+          ({ old: row }) => setEvents(p => p.filter(e => e.id !== row.id)))
+        .subscribe()
+
+      return () => { supabase.removeChannel(channel) }
     } else {
       fetch('/api/events')
         .then(r => r.json())
@@ -194,7 +207,13 @@ function useEvents() {
     else fetch(`/api/events/${id}`, { method: 'DELETE' }).catch(() => {})
   }
 
-  return { events, addEvent, updateEvent, deleteEvent }
+  const refetchEvents = () => {
+    if (supabase)
+      sb(supabase.from('events').select('*').order('date'))
+        .then(({ data } = {}) => { if (Array.isArray(data)) setEvents(data.map(evFromDb)) })
+  }
+
+  return { events, addEvent, updateEvent, deleteEvent, refetchEvents }
 }
 
 // ─── useTasks hook ────────────────────────────────────────────────────────────
@@ -232,10 +251,24 @@ function useTasks() {
   })
 
   useEffect(() => {
-    if (supabase) {
+    if (!supabase) return
+    fetchTasks()
+
+    function fetchTasks() {
       sb(supabase.from('tasks').select('*').order('created_at', { ascending: false }))
         .then(({ data } = {}) => { if (Array.isArray(data)) setTasks(data) })
     }
+
+    const channel = supabase.channel('tasks-sync')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'tasks' },
+        ({ new: row }) => setTasks(p => p.some(t => t.id === row.id) ? p : [row, ...p]))
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'tasks' },
+        ({ new: row }) => setTasks(p => p.map(t => t.id === row.id ? row : t)))
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'tasks' },
+        ({ old: row }) => setTasks(p => p.filter(t => t.id !== row.id)))
+      .subscribe()
+
+    return () => { supabase.removeChannel(channel) }
   }, [])
 
   const save = (list) => { localStorage.setItem('aaron_tasks', JSON.stringify(list)); return list }
@@ -267,7 +300,13 @@ function useTasks() {
     if (supabase) sb(supabase.from('tasks').delete().eq('id', id))
   }
 
-  return { tasks, addTask, updateTask, deleteTask }
+  const refetchTasks = () => {
+    if (supabase)
+      sb(supabase.from('tasks').select('*').order('created_at', { ascending: false }))
+        .then(({ data } = {}) => { if (Array.isArray(data)) setTasks(data) })
+  }
+
+  return { tasks, addTask, updateTask, deleteTask, refetchTasks }
 }
 
 // ─── WeekGrid ─────────────────────────────────────────────────────────────────
@@ -712,8 +751,11 @@ function WeekGrid({
                       </button>
                       <div className="ce-body">
                         <span className="ce-title">{ev.title}</span>
-                        {m.height > SLOT_H * 0.75 && st && (
-                          <span className="ce-time">{st}{et ? ` – ${et}` : ''}</span>
+                        {m.height >= SLOT_H && st && (
+                          <span className="ce-time">
+                            <span className="ce-time-row"><svg className="ce-pin ce-pin-start" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>{st}</span>
+                            {et && m.height >= SLOT_H * 1.5 && <span className="ce-time-row"><svg className="ce-pin ce-pin-end" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>{et}</span>}
+                          </span>
                         )}
                         {ev.notes && m.height > SLOT_H && (
                           <span className="ce-notes">{ev.notes}</span>
@@ -728,17 +770,19 @@ function WeekGrid({
                   const m = getEventMetrics({ startTime: task.scheduled_start, endTime: task.scheduled_end })
                   if (!m || m.top < 0) return null
                   const taskDragging = dragState?.taskId === task.id
+                  const tColor = PRIORITY_COLOR[task.priority || 'medium']
                   return (
                     <div
                       key={task.id}
                       className={`cal-task${task.done ? ' ct-done' : ''}${taskDragging ? ' ce-dragging' : ''}`}
-                      style={{ top: m.top, height: m.height, cursor: task.done ? 'default' : 'grab' }}
+                      style={{ top: m.top, height: m.height, cursor: task.done ? 'default' : 'grab', borderLeftColor: tColor, background: `${tColor}18` }}
                       onMouseDown={e => { if (!task.done) { e.stopPropagation(); handleTaskCalDragStart(e, task, di) } }}
                       onTouchStart={e => { if (!task.done) { e.stopPropagation(); handleTaskCalDragStart(e, task, di) } }}
                       onClick={e => { e.stopPropagation(); if (!justDraggedRef.current) onTaskClick(task) }}
                     >
                       <button
                         className={`ct-check${task.done ? ' ct-check-on' : ''}`}
+                        style={{ borderColor: tColor, background: task.done ? tColor : 'transparent' }}
                         onMouseDown={e => e.stopPropagation()}
                         onClick={e => {
                           e.stopPropagation()
@@ -752,11 +796,24 @@ function WeekGrid({
                           </svg>
                         )}
                       </button>
-                      <div className="ct-body">
-                        <span className="ct-title">{task.title}</span>
-                        {m.height > SLOT_H * 0.75 && task.scheduled_start && (
-                          <span className="ct-time">
-                            {fmt12(task.scheduled_start)}{task.scheduled_end ? ` – ${fmt12(task.scheduled_end)}` : ''}
+                      <div className="ce-body">
+                        {m.height >= SLOT_H ? (
+                          <>
+                            <span className="ce-title">
+                              <span className="ct-task-prefix" style={{ color: tColor }}>Task</span>
+                              <span className="ct-task-name">{task.title}</span>
+                            </span>
+                            {task.scheduled_start && (
+                              <span className="ce-time">
+                                <span className="ce-time-row"><svg className="ce-pin ce-pin-start" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>{fmt12(task.scheduled_start)}</span>
+                                {task.scheduled_end && m.height >= SLOT_H * 1.5 && <span className="ce-time-row"><svg className="ce-pin ce-pin-end" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>{fmt12(task.scheduled_end)}</span>}
+                              </span>
+                            )}
+                          </>
+                        ) : (
+                          <span className="ce-title ce-title-compact">
+                            <span className="ct-task-prefix" style={{ color: tColor, display: 'inline' }}>Task </span>
+                            <span style={{ display: 'inline' }}>{task.title}</span>
                           </span>
                         )}
                       </div>
@@ -804,8 +861,16 @@ function EventModal({ initial, onSave, onDelete, onClose }) {
     }
   }
 
+  const handleEndChange = (val) => {
+    if (val && form.startTime && val <= form.startTime) return
+    set('endTime', val)
+  }
+
   const handleSave = () => {
     if (!form.title.trim()) { setError('Title is required'); return }
+    if (form.startTime && form.endTime && form.endTime <= form.startTime) {
+      setError('End time must be after start time'); return
+    }
     const { time: _dropped, ...rest } = form
     onSave(rest)
   }
@@ -847,7 +912,7 @@ function EventModal({ initial, onSave, onDelete, onClose }) {
             </div>
             <div className="form-group">
               <label className="form-label">End</label>
-              <input className="form-input" type="time" value={form.endTime} onChange={e => set('endTime', e.target.value)} />
+              <input className="form-input" type="time" value={form.endTime} min={form.startTime || undefined} onChange={e => handleEndChange(e.target.value)} />
             </div>
           </div>
 
@@ -906,8 +971,6 @@ function EventModal({ initial, onSave, onDelete, onClose }) {
 
 // ─── TaskModal ────────────────────────────────────────────────────────────────
 
-const PRIORITY_COLOR_M = { high: '#ff3864', medium: '#ffe600', low: '#00ff9d' }
-const PRIORITY_LABEL_M = { high: 'High', medium: 'Med', low: 'Low' }
 
 function TaskModal({ task, onSave, onDelete, onClose }) {
   const [title,     setTitle]     = useState(task.title || '')
@@ -922,6 +985,9 @@ function TaskModal({ task, onSave, onDelete, onClose }) {
   const [newItem,   setNewItem]   = useState('')
   const [error,     setError]     = useState('')
 
+  const [editItemId, setEditItemId] = useState(null)
+  const [editItemText, setEditItemText] = useState('')
+
   const addItem = () => {
     if (!newItem.trim()) return
     const id = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2)
@@ -930,6 +996,11 @@ function TaskModal({ task, onSave, onDelete, onClose }) {
   }
   const toggleItem = (id) => setChecklist(cl => cl.map(c => c.id === id ? { ...c, done: !c.done } : c))
   const removeItem = (id) => setChecklist(cl => cl.filter(c => c.id !== id))
+  const startEditItem = (item) => { setEditItemId(item.id); setEditItemText(item.text) }
+  const saveEditItem = () => {
+    if (editItemText.trim()) setChecklist(cl => cl.map(c => c.id === editItemId ? { ...c, text: editItemText.trim() } : c))
+    setEditItemId(null)
+  }
 
   const handleStartChange = (val) => {
     setStart(val)
@@ -983,7 +1054,7 @@ function TaskModal({ task, onSave, onDelete, onClose }) {
     onClose()
   }
 
-  const pColor = PRIORITY_COLOR_M[prio]
+  const pColor = PRIORITY_COLOR[prio]
 
   return createPortal(
     <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
@@ -1017,10 +1088,10 @@ function TaskModal({ task, onSave, onDelete, onClose }) {
                 <button
                   key={p}
                   className={`tm-prio-btn${prio === p ? ' tm-prio-on' : ''}`}
-                  style={{ '--tmc': PRIORITY_COLOR_M[p] }}
+                  style={{ '--tmc': PRIORITY_COLOR[p] }}
                   onClick={() => setPrio(p)}
                 >
-                  {PRIORITY_LABEL_M[p]}
+                  {PRIORITY_LABEL[p]}
                 </button>
               ))}
             </div>
@@ -1084,7 +1155,22 @@ function TaskModal({ task, onSave, onDelete, onClose }) {
                   <button className={`tm-cl-check${item.done ? ' tm-cl-checked' : ''}`} onClick={() => toggleItem(item.id)}>
                     {item.done && <svg viewBox="0 0 10 8" fill="none" stroke="#000" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="1,4 4,7 9,1"/></svg>}
                   </button>
-                  <span className={`tm-cl-text${item.done ? ' tm-cl-text-done' : ''}`}>{item.text}</span>
+                  {editItemId === item.id ? (
+                    <input
+                      className="tm-cl-edit-input"
+                      value={editItemText}
+                      onChange={e => setEditItemText(e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Enter' || e.key === 'Escape') saveEditItem() }}
+                      onBlur={saveEditItem}
+                      autoFocus
+                    />
+                  ) : (
+                    <span
+                      className={`tm-cl-text${item.done ? ' tm-cl-text-done' : ''}`}
+                      onClick={() => startEditItem(item)}
+                      style={{ cursor: 'text', flex: 1 }}
+                    >{item.text}</span>
+                  )}
                   <button className="tm-cl-del" onClick={() => removeItem(item.id)}>✕</button>
                 </div>
               ))}
@@ -1204,8 +1290,8 @@ export default function Schedule() {
   const { events, addEvent, updateEvent, deleteEvent } = useEvents()
   const { tasks, addTask, updateTask, deleteTask }     = useTasks()
 
-  const [isMobile,    setIsMobile]    = useState(() => window.innerWidth < 768)
-  const [view,        setView]        = useState(() => window.innerWidth < 768 ? 'day' : 'week')
+  const [isMobile,    setIsMobile]    = useState(() => screen.width < 768)
+  const [view,        setView]        = useState(() => screen.width < 768 ? 'day' : 'week')
   const [weekOffset,  setWeekOffset]  = useState(0)
   const [dayOffset,   setDayOffset]   = useState(0)
   const [monthOffset, setMonthOffset] = useState(0)
@@ -1242,12 +1328,12 @@ export default function Schedule() {
 
   useEffect(() => {
     const handler = () => {
-      const mobile = window.innerWidth < 768
+      const mobile = screen.width < 768
       setIsMobile(mobile)
       if (mobile) setView(v => v === 'week' ? 'day' : v)
     }
-    window.addEventListener('resize', handler)
-    return () => window.removeEventListener('resize', handler)
+    window.addEventListener('orientationchange', handler)
+    return () => window.removeEventListener('orientationchange', handler)
   }, [])
 
   const days = view === 'day' ? [getDayFromOffset(dayOffset)] : getWeekDays(weekOffset)

@@ -1,0 +1,30 @@
+/* Shared icon buttons — import in any page that uses them */
+
+.ib-btn {
+  display: flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; border-radius: 8px;
+  border: none; cursor: pointer; flex-shrink: 0;
+  transition: background 0.15s, color 0.15s, opacity 0.15s;
+  font-family: inherit;
+}
+
+/* Edit / pencil — cyan */
+.ib-edit { background: transparent; color: var(--accent); }
+.ib-edit:hover { background: rgba(0, 229, 255, 0.12); }
+
+/* Save / checkmark — green */
+.ib-save { background: transparent; color: var(--green); }
+.ib-save:hover:not(:disabled) { background: rgba(0, 255, 157, 0.12); }
+.ib-save:disabled { opacity: 0.4; cursor: default; }
+
+/* Delete / trashcan — red */
+.ib-delete { background: transparent; color: var(--red); }
+.ib-delete:hover { background: rgba(255, 56, 100, 0.12); }
+
+/* Cancel / X — muted, turns red on hover */
+.ib-cancel { background: transparent; color: var(--text-muted); }
+.ib-cancel:hover { color: var(--red); background: rgba(255, 56, 100, 0.1); }
+
+/* Add / plus — grey until hover, then yellow */
+.ib-add { background: transparent; color: var(--text-muted); }
+.ib-add:hover { color: var(--amber); background: rgba(255, 230, 0, 0.12); }

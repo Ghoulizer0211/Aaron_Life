@@ -1,5 +1,7 @@
 ﻿import { useState, useEffect, useCallback, useRef, Fragment } from 'react'
 import { createPortal } from 'react-dom'
+import { EditBtn, SaveBtn, DeleteBtn, CancelBtn, AddBtn } from '../components/IconButtons'
+import '../components/IconButtons.css'
 import './Page.css'
 import './Health.css'
 
@@ -862,45 +864,41 @@ function WeekStrip({ logs, date, onDateChange }) {
 
 // LoggedWorkout — shows an existing log for a date
 function LoggedWorkout({ log, onDelete, onEdit }) {
-  const [open, setOpen] = useState(false)
   const logged  = (log.exercises || []).filter(e => !e.skipped)
   const skipped = (log.exercises || []).filter(e => e.skipped)
   const isRest  = log.day_name === 'Rest' && logged.length === 0
   return (
     <div className="card gym-logged">
-      <button className="gym-logged-header" onClick={() => setOpen(o => !o)}>
+      <div className="gym-logged-header">
         <div>
           <span className="gym-logged-title">{isRest ? '😴 Rest Day' : (log.day_name || 'Workout')}</span>
-          {log.plan_name && <span className="gym-logged-sub"> · {log.plan_name}</span>}
+          {log.plan_name && <span className="gym-logged-sub">{log.plan_name}</span>}
         </div>
-        <span className="wc-chevron">{open ? '▲' : '▼'}</span>
-      </button>
-      {open && (
-        <div className="gym-logged-body">
-          <div className="wc-divider" />
-          {isRest && <p className="health-empty" style={{ margin: 0 }}>Rest day logged.</p>}
-          {logged.map((ex, i) => (
-            <div key={i} className="wc-exercise">
-              <span className="wce-name">{ex.exercise_name}</span>
-              <span className="wce-sets">
-                {(ex.sets_data || []).map((s, j) => (
-                  <span key={j} className="wce-set">{s.weight}×{s.reps}</span>
-                ))}
-              </span>
-            </div>
-          ))}
-          {skipped.length > 0 && (
-            <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '6px 0 0' }}>
-              Skipped: {skipped.map(e => e.exercise_name).join(', ')}
-            </p>
-          )}
-          {log.notes && <p className="wc-notes">{log.notes}</p>}
-          <div className="wc-actions">
-            <button className="wc-edit" onClick={onEdit}>Edit</button>
-            <button className="wc-delete" onClick={() => onDelete(log.id)}>Delete</button>
+        <div className="wc-actions">
+          <EditBtn onClick={onEdit} />
+          <DeleteBtn onClick={() => onDelete(log.id)} />
+        </div>
+      </div>
+      <div className="gym-logged-body">
+        <div className="wc-divider" />
+        {isRest && <p className="health-empty" style={{ margin: 0 }}>Rest day logged.</p>}
+        {logged.map((ex, i) => (
+          <div key={i} className="wc-exercise">
+            <span className="wce-name">{ex.exercise_name}</span>
+            <span className="wce-sets">
+              {(ex.sets_data || []).map((s, j) => (
+                <span key={j} className="wce-set">{s.weight}×{s.reps}</span>
+              ))}
+            </span>
           </div>
-        </div>
-      )}
+        ))}
+        {skipped.length > 0 && (
+          <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '6px 0 0' }}>
+            Skipped: {skipped.map(e => e.exercise_name).join(', ')}
+          </p>
+        )}
+        {log.notes && <p className="wc-notes">{log.notes}</p>}
+      </div>
     </div>
   )
 }
@@ -1086,7 +1084,9 @@ function PlanDayLogger({ plans, date, onSave, onAutoSave, onDone, saving, onCanc
         </div>
       )}
 
-      <button className="gym-cancel-link" onClick={onCancel}>Cancel</button>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 4 }}>
+        <CancelBtn onClick={onCancel} />
+      </div>
     </div>
   )
 }
@@ -1284,7 +1284,9 @@ function CustomLogger({ date, onSave, onAutoSave, onDone, saving, onCancel, init
         {autoSaveStatus === 'saving' && <span className="autosave-status">Saving…</span>}
         {autoSaveStatus === 'saved'  && <span className="autosave-status autosave-status--saved">Saved ✓</span>}
       </div>
-      <button className="gym-cancel-link" onClick={onCancel}>Cancel</button>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 4 }}>
+        <CancelBtn onClick={onCancel} />
+      </div>
 
       {dragState && createPortal(
         <div ref={ghostElRef} className="pdb-ghost"
@@ -1416,17 +1418,19 @@ function PlanForm({ plan, onBack, onSaved }) {
 
   return (
     <div>
-      {/* Header: Back | Title | Save */}
+      {/* Header: Back | Title */}
       <div className="pf-header">
         <button className="pf-back" onClick={onBack}>{'<'} Back</button>
         <span className="pf-title">{plan ? 'Editing' : 'New Plan'}</span>
-        <button className="pf-save" onClick={handleSave} disabled={saving}>
-          {saving ? 'Saving…' : 'Save'}
-        </button>
       </div>
 
-      <input className="form-input pf-plan-name" placeholder="Plan name (e.g. Push Pull Legs)"
-        value={name} onChange={e => setName(e.target.value)} />
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+        <input className="form-input pf-plan-name" style={{ margin: 0, flex: 1 }} placeholder="Plan name (e.g. Push Pull Legs)"
+          value={name} onChange={e => setName(e.target.value)} />
+        <AddBtn onClick={addDay} />
+        <SaveBtn onClick={handleSave} disabled={saving} />
+        {plan && <DeleteBtn onClick={handleDelete} />}
+      </div>
 
       {days.map((day, di) => {
         const isCollapsed = collapsedDays.has(di)
@@ -1443,7 +1447,8 @@ function PlanForm({ plan, onBack, onSaved }) {
                 <span className="pdb-ex-count">{day.exercises.length} {day.exercises.length === 1 ? 'exercise' : 'exercises'}</span>
               )}
             </div>
-            <button className="ex-remove" onClick={() => removeDay(di)}>✕</button>
+            <AddBtn onClick={() => addExercise(di)} />
+            <DeleteBtn onClick={() => removeDay(di)} />
           </div>
           {!isCollapsed && day.exercises.map((ex, ei) => {
             let rowTransform = 'none', rowOpacity = 1
@@ -1474,22 +1479,15 @@ function PlanForm({ plan, onBack, onSaved }) {
                   }}>⠿</span>
                 <input className="form-input pdb-ex-name" placeholder="Exercise name"
                   value={ex.exercise_name} onChange={e => updateExercise(di, ei, 'exercise_name', e.target.value)} />
-                <button className="ex-remove" onClick={() => removeExercise(di, ei)}>✕</button>
+                <DeleteBtn onClick={() => removeExercise(di, ei)} />
               </div>
             )
           })}
-          {!isCollapsed && <button className="add-ex-btn" onClick={() => addExercise(di)}>+ Exercise</button>}
         </div>
         )
       })}
 
-      <button className="pf-add-day" onClick={addDay}>+ Add Day</button>
-
       {err && <p className="form-error" style={{ marginTop: 8 }}>{err}</p>}
-
-      {plan && (
-        <button className="pf-delete" onClick={handleDelete}>Delete Plan</button>
-      )}
 
       {dragState && createPortal(
         <div ref={ghostElRef} className="pdb-ghost"
@@ -1550,6 +1548,16 @@ function EditLogView({ log, date, onSave, saving, onCancel }) {
 
   return (
     <div>
+      <div className="gym-logged-header" style={{ paddingLeft: 0, paddingRight: 0, paddingTop: 0 }}>
+        <div>
+          <span className="gym-logged-title">{log.day_name || 'Workout'}</span>
+          {log.plan_name && <span className="gym-logged-sub">{log.plan_name}</span>}
+        </div>
+        <div className="wc-actions">
+          <CancelBtn onClick={onCancel} />
+          <SaveBtn onClick={handleSave} disabled={saving} />
+        </div>
+      </div>
       {(log.exercises || []).filter(e => e.exercise_name).map(ex => (
         <ExerciseCard
           key={ex.exercise_name}
@@ -1562,12 +1570,6 @@ function EditLogView({ log, date, onSave, saving, onCancel }) {
       <textarea className="form-input form-textarea" placeholder="Session notes (optional)…"
         value={notes} onChange={e => setNotes(e.target.value)} style={{ marginTop: 8 }} />
       {err && <p className="form-error">{err}</p>}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8 }}>
-        <button className="connect-btn health-connect-btn" onClick={handleSave} disabled={saving} style={{ margin: 0 }}>
-          {saving ? 'Saving…' : 'Save Changes'}
-        </button>
-      </div>
-      <button className="gym-cancel-link" onClick={onCancel}>Cancel</button>
     </div>
   )
 }
@@ -1679,7 +1681,7 @@ function GymPlansView({ plansHook }) {
               ? <span className="plan-active-badge">Active</span>
               : <button className="plan-activate-btn" onClick={() => setActive(p.id)}>Set Active</button>
             }
-            <button className="action-btn" onClick={() => setEditing(p)}>Edit</button>
+            <EditBtn onClick={() => setEditing(p)} />
           </div>
         </div>
       ))}

@@ -74,7 +74,7 @@
 .hnav-center {
   flex: 1; display: flex; align-items: center; justify-content: center; gap: 10px;
 }
-.hnav-label { font-size: 17px; font-weight: 600; color: var(--text-primary); }
+.hnav-label { font-size: 15px; font-weight: 600; color: var(--text-primary); }
 .hnav-today {
   font-size: 14px; font-weight: 600; color: var(--green);
   background: rgba(0,255,157,0.08); border-radius: 6px; padding: 3px 8px;
@@ -221,9 +221,11 @@
 .gtr-streak    { font-size: 12px; font-weight: 600; color: var(--text-muted); margin-top: 4px; }
 .gtr-edit-btn  {
   font-size: 12px; font-weight: 600; color: var(--text-muted);
-  background: transparent; border: 1px solid var(--border);
+  background: var(--accent-dim); color: var(--accent);
   border-radius: 8px; padding: 5px 10px; cursor: pointer; align-self: flex-start;
+  transition: background 0.15s;
 }
+.gtr-edit-btn:hover { background: rgba(0,229,255,0.15); }
 .gtr-empty     { font-size: 13px; color: var(--text-muted); }
 .gtr-start-btn {
   font-size: 13px; font-weight: 700; color: #000;
@@ -302,8 +304,8 @@
   padding: 12px 16px; border-bottom: 1px solid var(--border);
 }
 .detail-row:last-child { border-bottom: none; }
-.detail-label { font-size: 16px; color: var(--text-secondary); }
-.detail-value { font-size: 17px; font-weight: 600; color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.detail-label { font-size: 15px; color: var(--text-secondary); }
+.detail-value { font-size: 15px; font-weight: 600; color: var(--text-primary); font-variant-numeric: tabular-nums; }
 
 /* ── Insight card ────────────────────────────────────────────────────────────── */
 
@@ -444,7 +446,7 @@
   padding: 14px 16px; width: 100; text-align: left; font-family: inherit;
 }
 .wc-left  { display: flex; flex-direction: column; gap: 3px; }
-.wc-type  { font-size: 16px; font-weight: 700; }
+.wc-type  { font-size: 15px; font-weight: 700; }
 .wc-date  { font-size: 13px; color: var(--text-muted); }
 .wc-right { display: flex; align-items: center; gap: 8px; }
 .wc-intensity { font-size: 12px; color: var(--text-muted); font-weight: 600;
@@ -457,16 +459,23 @@
   display: flex; flex-direction: column; gap: 8px;
 }
 .wc-exercise { display: flex; flex-direction: column; gap: 2px; padding-top: 8px; padding-left: 10px; }
-.wce-name { font-size: 14px; font-weight: 700; color: var(--text-primary); }
+.wce-name { font-size: 15px; font-weight: 700; color: var(--text-primary); }
 .wce-sets { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
 .wce-set  { font-size: 12px; color: var(--text-muted); background: var(--bg-card);
   border: 1px solid var(--border); border-radius: 5px; padding: 2px 7px; }
 .wc-notes { font-size: 13px; color: var(--text-muted); font-style: italic; }
 .wc-divider { height: 1px; background: var(--border); margin: 0 0 10px; }
-.wc-actions { display: flex; align-items: center; gap: 0; margin-top: 10px; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
-.wc-edit, .wc-delete { flex: 1; padding: 9px 0; font-size: 13px; font-weight: 700; font-family: inherit; text-align: center; }
-.wc-edit { color: var(--accent); border-right: 1px solid var(--border); }
-.wc-delete { color: var(--red); }
+.wc-actions { display: flex; align-items: center; gap: 6px; margin-top: 10px; justify-content: flex-end; }
+.wc-edit, .wc-delete {
+  width: 28px; height: 28px; border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 14px; font-family: inherit; font-weight: 700;
+  transition: color 0.15s, background 0.15s;
+}
+.wc-edit { color: var(--text-muted); }
+.wc-edit:hover { color: var(--accent); background: var(--accent-dim); }
+.wc-delete { color: var(--text-muted); }
+.wc-delete:hover { color: var(--red); background: rgba(255,56,100,0.1); }
 
 /* ── Add Workout Modal ───────────────────────────────────────────────────────── */
 
@@ -514,7 +523,7 @@
 .form-label { font-size: 13px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
 .form-input {
   background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px;
-  padding: 11px 14px; font-size: 16px; color: var(--text-primary); font-family: inherit;
+  padding: 11px 14px; font-size: 15px; color: var(--text-primary); font-family: inherit;
   outline: none; transition: border-color 0.15s; width: 100%;
 }
 .form-input:focus { border-color: var(--accent); }
@@ -539,7 +548,14 @@
 }
 .ex-header { display: flex; gap: 8px; align-items: center; }
 .ex-name   { flex: 1; }
-.ex-remove { font-size: 16px; color: var(--text-muted); font-family: inherit; flex-shrink: 0; padding: 4px; }
+.ex-remove {
+  width: 28px; height: 28px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 8px; font-family: inherit; font-size: 14px;
+  color: var(--text-muted);
+  transition: color 0.15s, background 0.15s;
+}
+.ex-remove:hover { color: var(--red); background: rgba(255,56,100,0.1); }
 
 .set-row   { display: flex; gap: 8px; align-items: center; }
 .set-input { flex: 1; }
@@ -611,7 +627,7 @@
   -webkit-tap-highlight-color: transparent; flex-shrink: 0;
 }
 .ws-title-wrap { flex: 1; display: flex; flex-direction: column; gap: 1px; overflow: hidden; }
-.ws-title { font-size: 17px; font-weight: 700; color: var(--text-primary); }
+.ws-title { font-size: 15px; font-weight: 700; color: var(--text-primary); }
 .ws-plan-name { font-size: 12px; color: var(--text-muted); }
 
 /* ── Day chips ───────────────────────────────────────────────────────────────── */
@@ -623,7 +639,7 @@
   -webkit-tap-highlight-color: transparent;
 }
 .day-chip:active { background: var(--accent-dim); border-color: var(--accent); }
-.dc-name { font-size: 16px; font-weight: 700; color: var(--text-primary); }
+.dc-name { font-size: 15px; font-weight: 700; color: var(--text-primary); }
 .dc-count { font-size: 13px; color: var(--text-muted); }
 
 /* ── Exercise card ───────────────────────────────────────────────────────────── */
@@ -679,22 +695,23 @@
 /* ── Plans view ─────────────────────────────────────────────────────────────── */
 .plans-fab {
   position: fixed; bottom: 88px; right: 20px; z-index: 100;
-  width: 56px; height: 56px; border-radius: 16px;
-  background: rgba(0,230,255,0.18);
-  border: 2px solid rgba(0,230,255,0.9);
-  color: rgb(0,230,255); font-size: 30px; font-weight: 300; font-family: inherit;
+  width: 52px; height: 52px; border-radius: 16px;
+  background: var(--accent);
+  color: #000; font-size: 28px; font-weight: 300; font-family: inherit;
   display: flex; align-items: center; justify-content: center;
-  box-shadow: 0 0 24px rgba(0,230,255,0.5), 0 0 8px rgba(0,230,255,0.3), inset 0 0 16px rgba(0,230,255,0.12);
+  box-shadow: 0 4px 20px rgba(0,229,255,0.45), 0 0 0 1px rgba(0,229,255,0.2);
   line-height: 1; padding-bottom: 1px;
+  transition: box-shadow 0.2s, transform 0.15s;
 }
-.plans-fab:active { transform: scale(0.9); opacity: 0.8; }
+.plans-fab:hover { box-shadow: 0 6px 28px rgba(0,229,255,0.6), 0 0 0 1px rgba(0,229,255,0.35); }
+.plans-fab:active { transform: scale(0.93); opacity: 0.8; }
 
 .plan-row {
   display: flex; align-items: center; justify-content: space-between;
   padding: 14px 16px; margin-bottom: 10px;
 }
 .plan-row-left { display: flex; flex-direction: column; gap: 3px; }
-.plan-row-name { font-size: 16px; font-weight: 700; color: var(--text-primary); }
+.plan-row-name { font-size: 15px; font-weight: 700; color: var(--text-primary); }
 .plan-row-meta { font-size: 13px; color: var(--text-muted); }
 .plan-row-right { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
 .plan-active-badge {
@@ -722,7 +739,7 @@
 }
 .pdb-name-input {
   flex: 1; min-width: 0; background: transparent; border: none; outline: none;
-  font-size: 17px; font-weight: 700; color: var(--text-primary);
+  font-size: 15px; font-weight: 700; color: var(--text-primary);
   font-family: inherit; padding: 9px 0;
 }
 .pdb-name-input::placeholder { color: var(--text-muted); font-weight: 400; }
@@ -773,7 +790,7 @@
   display: flex; align-items: center; justify-content: space-between;
   padding: 8px 0 14px; gap: 8px;
 }
-.gym-date-label { font-size: 17px; font-weight: 700; color: var(--text-primary); }
+.gym-date-label { font-size: 15px; font-weight: 700; color: var(--text-primary); }
 
 /* Log options (Use Plan / Custom / Rest) */
 .gym-log-options { display: flex; flex-direction: column; gap: 10px; margin-top: 4px; }
@@ -787,7 +804,7 @@
 .gym-log-opt--rest:active { border-color: #888; }
 .glo-icon  { font-size: 26px; flex-shrink: 0; }
 .glo-text  { display: flex; flex-direction: column; gap: 2px; }
-.glo-label { font-size: 16px; font-weight: 700; color: var(--text-primary); }
+.glo-label { font-size: 15px; font-weight: 700; color: var(--text-primary); }
 .glo-sub   { font-size: 13px; color: var(--text-muted); }
 
 /* Logged workout card */
@@ -796,8 +813,8 @@
   display: flex; align-items: center; justify-content: space-between;
   width: 100%; padding: 14px 16px; font-family: inherit; text-align: left;
 }
-.gym-logged-title { font-size: 16px; font-weight: 700; color: var(--text-primary); }
-.gym-logged-sub   { font-size: 13px; color: var(--text-muted); }
+.gym-logged-title { font-size: 18px; font-weight: 700; color: var(--text-primary); }
+.gym-logged-sub   { font-size: 13px; color: var(--text-muted); display: block; margin-top: 2px; }
 .gym-logged-body  { padding: 0 16px 14px; }
 
 /* Plan/day chip picker */
@@ -814,12 +831,12 @@
 .gym-chip-count   { font-size: 11px; color: var(--text-muted); font-weight: 400; margin-top: 1px; }
 
 /* Custom logger */
-.cl-title { font-size: 17px; font-weight: 700; margin-bottom: 12px; border-color: var(--accent); }
+.cl-title { font-size: 15px; font-weight: 700; margin-bottom: 12px; border-color: var(--accent); }
 .cl-title::placeholder { color: var(--text-muted); font-weight: 500; }
 .cl-ex-header { display: flex; align-items: center; gap: 8px; }
 .cl-ex-toggle { flex: 1; display: flex; align-items: center; justify-content: space-between; gap: 8px; font-family: inherit; text-align: left; min-width: 0; }
 .cl-placeholder { color: var(--text-muted); font-weight: 400; font-size: 14px; }
-.cl-ex-name-input { flex: 1; background: transparent; border: none; outline: none; font-size: 16px; font-weight: 700; color: var(--text-primary); font-family: inherit; min-width: 0; padding: 0; }
+.cl-ex-name-input { flex: 1; background: transparent; border: none; outline: none; font-size: 15px; font-weight: 700; color: var(--text-primary); font-family: inherit; min-width: 0; padding: 0; }
 .cl-ex-name-input::placeholder { color: var(--text-muted); font-weight: 500; }
 .cl-chevron-btn { flex-shrink: 0; padding: 2px 4px; font-family: inherit; background: transparent; border: none; color: var(--text-muted); cursor: pointer; }
 

@@ -98,7 +98,7 @@ html.is-desktop .bottom-nav {
   right: 0;
   bottom: auto;
   width: 100%;
-  height: calc(56px + var(--safe-top));
+  height: calc(52px + var(--safe-top));
   flex-shrink: 0;
   display: flex;
   flex-direction: row;
@@ -110,7 +110,7 @@ html.is-desktop .bottom-nav {
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
   z-index: 10;
-  padding: var(--safe-top) 16px 0;
+  padding: var(--safe-top) 16px 0 0;
   gap: 0;
 }
 
@@ -130,29 +130,31 @@ html.is-desktop .nav-brand {
   display: flex;
   flex-direction: row;
   align-items: center;
-  gap: 12px;
-  padding: 0 20px 0 4px;
+  gap: 14px;
+  width: 300px;
+  padding: 0 24px 0 4px;
   border-bottom: none;
   border-right: 1px solid var(--border);
-  margin-right: 12px;
+  margin-right: 0;
   flex-shrink: 0;
-  height: 56px;
+  height: 52px;
+  box-sizing: border-box;
 }
 
 html.is-desktop .brand-name {
   font-family: 'Orbitron', sans-serif;
-  font-size: 15px;
+  font-size: 18px;
   font-weight: 700;
   letter-spacing: 2px;
   text-transform: uppercase;
   color: var(--accent);
   -webkit-text-fill-color: var(--accent);
-  text-shadow: 0 0 10px rgba(0, 229, 255, 0.6);
+  text-shadow: 0 0 14px rgba(0, 229, 255, 0.7), 0 0 30px rgba(0, 229, 255, 0.3);
   white-space: nowrap;
 }
 
 html.is-desktop .brand-date {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-muted);
   letter-spacing: 0.3px;
   white-space: nowrap;
@@ -162,7 +164,7 @@ html.is-desktop .nav-items {
   flex-direction: row;
   align-items: center;
   justify-content: flex-start;
-  height: 56px;
+  height: 52px;
   padding: 0;
   gap: 2px;
   flex: 1;
@@ -170,15 +172,15 @@ html.is-desktop .nav-items {
 
 html.is-desktop .nav-item {
   flex-direction: row;
-  height: 44px;
+  height: 50px;
   flex: none;
   width: auto;
-  padding: 0 18px;
+  padding: 0 22px;
   border-radius: 8px;
   justify-content: center;
   gap: 8px;
   color: #c0c0c0;
-  font-size: 14px;
+  font-size: 15px;
   text-shadow: none;
   transition: background 0.15s, color 0.15s;
 }
@@ -196,7 +198,7 @@ html.is-desktop .nav-item.active {
   border-bottom: 2px solid var(--accent);
   border-radius: 0;
   box-shadow: none;
-  height: 56px;
+  height: 52px;
   padding-top: 2px;
 }
 
@@ -208,12 +210,34 @@ html.is-desktop .nav-item.active .nav-icon {
 
 html.is-desktop .nav-item.active .nav-icon svg { transform: none; }
 
-html.is-desktop .nav-icon { width: 20px; height: 20px; }
-html.is-desktop .nav-icon svg { width: 18px; height: 18px; }
+html.is-desktop .nav-icon { width: 22px; height: 22px; }
+html.is-desktop .nav-icon svg { width: 20px; height: 20px; }
 
 html.is-desktop .nav-label {
-  font-size: 15px;
-  font-weight: 600;
+  font-size: 24px;
+  font-weight: 400;
   letter-spacing: 0.3px;
   text-transform: none;
 }
+
+.nav-refresh {
+  display: none;
+}
+
+html.is-desktop .nav-refresh {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px; height: 36px;
+  margin-right: 8px;
+  border-radius: 8px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+  transition: color 0.15s, background 0.15s;
+  -webkit-tap-highlight-color: transparent;
+}
+html.is-desktop .nav-refresh:hover {
+  color: var(--accent);
+  background: rgba(0, 229, 255, 0.08);
+}
+html.is-desktop .nav-refresh svg { width: 16px; height: 16px; }
