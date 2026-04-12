@@ -2,11 +2,12 @@
 
 .ib-btn {
   display: flex; align-items: center; justify-content: center;
-  width: 28px; height: 28px; border-radius: 8px;
+  width: 44px; height: 44px; border-radius: 10px;
   border: none; cursor: pointer; flex-shrink: 0;
   transition: background 0.15s, color 0.15s, opacity 0.15s;
   font-family: inherit;
 }
+.ib-btn svg { width: 20px; height: 20px; flex-shrink: 0; }
 
 /* Edit / pencil — cyan */
 .ib-edit { background: transparent; color: var(--accent); }
@@ -17,14 +18,18 @@
 .ib-save:hover:not(:disabled) { background: rgba(0, 255, 157, 0.12); }
 .ib-save:disabled { opacity: 0.4; cursor: default; }
 
-/* Delete / trashcan — red */
+/* Delete / trashcan — bright red, strong glow on hover */
 .ib-delete { background: transparent; color: var(--red); }
-.ib-delete:hover { background: rgba(255, 56, 100, 0.12); }
+.ib-delete:hover {
+  background: rgba(255, 56, 100, 0.18);
+  box-shadow: 0 0 8px rgba(255, 56, 100, 0.5);
+}
 
-/* Cancel / X — muted, turns red on hover */
-.ib-cancel { background: transparent; color: var(--text-muted); }
-.ib-cancel:hover { color: var(--red); background: rgba(255, 56, 100, 0.1); }
+/* Cancel / X — muted red, visible on dark bg */
+.ib-cancel { background: transparent; color: #c0304a; }
+.ib-cancel:hover { color: var(--red); background: rgba(255, 56, 100, 0.07); }
 
-/* Add / plus — grey until hover, then yellow */
+/* Add / plus — grey until hover/active, then yellow */
 .ib-add { background: transparent; color: var(--text-muted); }
 .ib-add:hover { color: var(--amber); background: rgba(255, 230, 0, 0.12); }
+.ib-add:active { color: var(--amber); background: rgba(255, 230, 0, 0.22); }

@@ -23,6 +23,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { supabase, sb } from '../lib/supabase'
+import { ls } from '../lib/storage'
 import { EditBtn, SaveBtn, DeleteBtn, CancelBtn, AddBtn } from '../components/IconButtons'
 import '../components/IconButtons.css'
 
@@ -110,7 +111,7 @@ function useHabits() {
           try {
             const remote = JSON.parse(data.value)
             setOrder(remote)
-            localStorage.setItem('habit_order', data.value)
+            ls.set('habit_order', data.value)
           } catch {}
         }
       })
@@ -301,7 +302,7 @@ function HabitTracker({ showAdd, onShowAddChange }) {
 
   // ── Drag-to-reorder (pointer-based, matches Health.jsx exercise drag) ─────
   const [order, setOrder] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('habit_order') || '[]') } catch { return [] }
+    try { return JSON.parse(ls.get('habit_order') || '[]') } catch { return [] }
   })
   const habitRowRefs = useRef({})
   const ghostElRef   = useRef(null)
@@ -330,7 +331,7 @@ function HabitTracker({ showAdd, onShowAddChange }) {
         newOrder.splice(dr.targetIdx, 0, moved)
         setOrder(newOrder)
         const json = JSON.stringify(newOrder)
-        localStorage.setItem('habit_order', json)
+        ls.set('habit_order', json)
         if (supabase) sb(supabase.from('settings').upsert({ key: 'habit_order', value: json }))
       }
       setDragState(null); dragRef.current = null
@@ -491,7 +492,7 @@ function HabitTracker({ showAdd, onShowAddChange }) {
                   <SaveBtn onClick={saveEdit} />
                 </>
               ) : (
-                <EditBtn onClick={() => startEdit(habit)} />
+                <EditBtn onClick={() => startEdit(habit)} className="ht-edit-btn" />
               )}
             </div>
             {/* Row 2: goal + checkboxes + % bar */}
@@ -568,7 +569,7 @@ const sortByPrio = arr => [...arr].sort((a, b) =>
   (PRIO_ORDER[a.priority || 'medium'] ?? 1) - (PRIO_ORDER[b.priority || 'medium'] ?? 1)
 )
 
-function TaskRow({ task, onTaskToggle, onUpdateTask, onDeleteTask, onDragStart, onDragEnd, editingId, setEditingId }) {
+function TaskRow({ task, onTaskToggle, onUpdateTask, onDeleteTask, onDragStart, onDragEnd, onMobileLongPress, editingId, setEditingId }) {
   const editing = editingId === task.id
   const [editTitle, setEditTitle] = useState('')
   const [editPrio,  setEditPrio]  = useState('medium')
@@ -643,6 +644,29 @@ function TaskRow({ task, onTaskToggle, onUpdateTask, onDeleteTask, onDragStart, 
 
   const prio   = task.priority || 'medium'
   const pColor = PRIORITY_COLOR[prio]
+
+  // ── Mobile long-press to schedule ──────────────────────────────────────────
+  const lpTimer = useRef(null)
+  const lpOrigin = useRef(null)
+
+  const onLpStart = (e) => {
+    if (task.done || !onMobileLongPress) return
+    const t = e.touches[0]
+    lpOrigin.current = { x: t.clientX, y: t.clientY }
+    lpTimer.current = setTimeout(() => {
+      lpTimer.current = null
+      if (navigator.vibrate) navigator.vibrate(40)
+      onMobileLongPress(task)
+    }, 500)
+  }
+  const onLpMove = (e) => {
+    if (!lpTimer.current) return
+    const t = e.touches[0]
+    if (Math.hypot(t.clientX - lpOrigin.current.x, t.clientY - lpOrigin.current.y) > 8) {
+      clearTimeout(lpTimer.current); lpTimer.current = null
+    }
+  }
+  const onLpEnd = () => { clearTimeout(lpTimer.current); lpTimer.current = null }
 
   if (editing) return (
     <div className="tl-edit-form" style={{ borderLeft: `3px solid ${PRIORITY_COLOR[editPrio]}` }}>
@@ -746,6 +770,10 @@ function TaskRow({ task, onTaskToggle, onUpdateTask, onDeleteTask, onDragStart, 
         draggable={!task.done}
         onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('taskid', task.id); onDragStart(task) }}
         onDragEnd={onDragEnd}
+        onTouchStart={onLpStart}
+        onTouchMove={onLpMove}
+        onTouchEnd={onLpEnd}
+        onTouchCancel={onLpEnd}
       >
         <span className="tl-drag" />
         {(() => {
@@ -761,7 +789,10 @@ function TaskRow({ task, onTaskToggle, onUpdateTask, onDeleteTask, onDragStart, 
             </button>
           )
         })()}
-        <span className="tl-name">{task.title}</span>
+        <span
+          className={`tl-name${checklist.length > 0 ? ' tl-name-clickable' : ''}`}
+          onClick={checklist.length > 0 ? () => setExpanded(e => !e) : undefined}
+        >{task.title}</span>
         {!task.done && (
           <EditBtn onClick={startEdit} className="tl-edit-btn" />
         )}
@@ -801,7 +832,7 @@ function TaskRow({ task, onTaskToggle, onUpdateTask, onDeleteTask, onDragStart, 
   )
 }
 
-function TaskList({ tasks, onAddTask, onUpdateTask, onDeleteTask, onTaskToggle, onDragStart, onDragEnd, selectedDate, onClearDate, showAdd, onShowAddChange }) {
+function TaskList({ tasks, onAddTask, onUpdateTask, onDeleteTask, onTaskToggle, onDragStart, onDragEnd, onMobileLongPress, selectedDate, onClearDate, showAdd, onShowAddChange }) {
   const [editingId, setEditingId] = useState(null)
 
   const handleSetEditingId = (id) => { setEditingId(id); if (id) onShowAddChange(false) }
@@ -867,7 +898,7 @@ function TaskList({ tasks, onAddTask, onUpdateTask, onDeleteTask, onTaskToggle, 
   // Section 3: no due date, not done
   const moreTasks = sortByPrio(tasks.filter(t => !t.done && !t.due_date))
 
-  const rowProps = { onTaskToggle, onUpdateTask, onDeleteTask, onDragStart, onDragEnd, editingId, setEditingId: handleSetEditingId }
+  const rowProps = { onTaskToggle, onUpdateTask, onDeleteTask, onDragStart, onDragEnd, onMobileLongPress, editingId, setEditingId: handleSetEditingId }
 
   return (
     <div className="tl-wrap">
@@ -1016,19 +1047,72 @@ export default function TaskPanel({
   onTaskToggle,
   onDragStart,
   onDragEnd,
+  onMobileLongPress,
   onDateClick,
   isAtToday, onGoToday,
   panelMode, selectedTask, onPanelMode, onSelectTask,
+  mobileMode  = false,
+  onPanelTouchStart,
+  onPanelTouchMove,
+  onPanelTouchEnd,
 }) {
   const [selectedDate,  setSelectedDate]  = useState(null)
   const [habitShowAdd,  setHabitShowAdd]  = useState(false)
   const [taskShowAdd,   setTaskShowAdd]   = useState(false)
+  const [mobileTab,     setMobileTab]     = useState('habits')
 
   const handleDateClick = (dateS) => {
     setSelectedDate(dateS)
     if (onDateClick) onDateClick(dateS)
   }
 
+  // ── Mobile panel: tabs for Habit Tracker / Tasks ─────────────────────────
+  if (mobileMode) {
+    return (
+      <div className="mp-panel">
+        <div className="mp-tabs"
+          onTouchStart={onPanelTouchStart}
+          onTouchMove={onPanelTouchMove}
+          onTouchEnd={onPanelTouchEnd}
+        >
+          <button
+            className={`mp-tab${mobileTab === 'habits' ? ' mp-tab-active' : ''}`}
+            onClick={() => setMobileTab('habits')}
+          >
+            Habit Tracker
+          </button>
+          <button
+            className={`mp-tab${mobileTab === 'tasks' ? ' mp-tab-active' : ''}`}
+            onClick={() => setMobileTab('tasks')}
+          >
+            Tasks
+          </button>
+        </div>
+        <div className="mp-content">
+          {mobileTab === 'habits' ? (
+            <HabitTracker showAdd={habitShowAdd} onShowAddChange={setHabitShowAdd} />
+          ) : (
+            <TaskList
+              tasks={tasks}
+              onAddTask={onAddTask}
+              onUpdateTask={onUpdateTask}
+              onDeleteTask={onDeleteTask}
+              onTaskToggle={onTaskToggle}
+              onDragStart={onDragStart}
+              onDragEnd={onDragEnd}
+              onMobileLongPress={onMobileLongPress}
+              selectedDate={selectedDate}
+              onClearDate={() => setSelectedDate(null)}
+              showAdd={taskShowAdd}
+              onShowAddChange={setTaskShowAdd}
+            />
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  // ── Desktop sidebar ───────────────────────────────────────────────────────
   return (
     <div className="sc-sidebar">
       <Section title="Calendar">

@@ -7,16 +7,15 @@ import Finance from './pages/Finance'
 import Settings from './pages/Settings'
 import LockScreen from './components/LockScreen'
 import { supabase, sb } from './lib/supabase'
+import { ls, ss } from './lib/storage'
 import './App.css'
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('schedule')
   const [locked, setLocked] = useState(() => {
-    // Resolve immediately — never show a blank screen
-    // On HTTP (non-secure context), crypto.subtle is unavailable so PIN can't work — skip lock
     if (!window.isSecureContext) return false
-    const hasPin   = !!localStorage.getItem('aaron_security_pin_hash')
-    const unlocked = !!sessionStorage.getItem('aaron_unlocked')
+    const hasPin   = !!ls.get('aaron_security_pin_hash')
+    const unlocked = !!ss.get('aaron_unlocked')
     return hasPin && !unlocked
   })
 
@@ -24,21 +23,18 @@ export default function App() {
     // Skip security sync on HTTP — crypto.subtle not available
     if (!window.isSecureContext) return
 
-    const localHash = localStorage.getItem('aaron_security_pin_hash')
-    const sessionUnlocked = !!sessionStorage.getItem('aaron_unlocked')
+    const localHash = ls.get('aaron_security_pin_hash')
+    const sessionUnlocked = !!ss.get('aaron_unlocked')
 
     const applyServerHash = (serverHash) => {
       if (serverHash && !localHash) {
-        // Different device — pull the PIN hash and lock
-        // Clear cred_id only here since this device hasn't registered biometrics yet
-        localStorage.setItem('aaron_security_pin_hash', serverHash)
-        localStorage.removeItem('aaron_security_cred_id')
+        ls.set('aaron_security_pin_hash', serverHash)
+        ls.remove('aaron_security_cred_id')
         if (!sessionUnlocked) setLocked(true)
       }
       if (!serverHash && localHash) {
-        // PIN was disabled on another device — clear locally too (including biometrics)
-        localStorage.removeItem('aaron_security_pin_hash')
-        localStorage.removeItem('aaron_security_cred_id')
+        ls.remove('aaron_security_pin_hash')
+        ls.remove('aaron_security_cred_id')
         setLocked(false)
       }
       // If serverHash === localHash: same device, don't touch cred_id
@@ -82,7 +78,7 @@ export default function App() {
 
   const resetTimer = useCallback(() => {
     if (!window.isSecureContext) return
-    const hasPin = !!localStorage.getItem('aaron_security_pin_hash')
+    const hasPin = !!ls.get('aaron_security_pin_hash')
     if (!hasPin) return
     clearTimeout(timerRef.current)
     timerRef.current = setTimeout(() => {

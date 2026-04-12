@@ -1,6 +1,7 @@
 ﻿import { useState, useEffect, useCallback, useRef, Fragment } from 'react'
 import { createPortal } from 'react-dom'
 import { EditBtn, SaveBtn, DeleteBtn, CancelBtn, AddBtn } from '../components/IconButtons'
+import { ls } from '../lib/storage'
 import '../components/IconButtons.css'
 import './Page.css'
 import './Health.css'
@@ -110,7 +111,7 @@ function calcWeekFreqFromLogs(logs) {
 function useOuraToday(linked, date) {
   const cacheKey = `aaron_health_${date}`
   const [data, setData]       = useState(() => {
-    try { return JSON.parse(localStorage.getItem(cacheKey) || 'null') } catch { return null }
+    try { return JSON.parse(ls.get(cacheKey) || 'null') } catch { return null }
   })
   const [loading, setLoading] = useState(false)
   const [error,   setError]   = useState(null)
@@ -123,7 +124,7 @@ function useOuraToday(linked, date) {
       const json = await res.json()
       if (json.error) throw new Error(json.error)
       setData(json)
-      localStorage.setItem(`aaron_health_${d}`, JSON.stringify(json))
+      ls.set(`aaron_health_${d}`, JSON.stringify(json))
     } catch (e) { setError(e.message) }
     finally { setLoading(false) }
   }, [])
@@ -131,7 +132,7 @@ function useOuraToday(linked, date) {
   useEffect(() => {
     if (!linked) return
     // Show localStorage instantly, then load from server (server checks Supabase cache first)
-    const cached = localStorage.getItem(`aaron_health_${date}`)
+    const cached = ls.get(`aaron_health_${date}`)
     if (cached) { try { setData(JSON.parse(cached)) } catch { /* ignore */ } }
     fetch_(date, false)
   }, [linked, date, fetch_])
@@ -141,14 +142,14 @@ function useOuraToday(linked, date) {
 
 function useOuraWeek(linked) {
   const [data, setData] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('aaron_health_week') || 'null') } catch { return null }
+    try { return JSON.parse(ls.get('aaron_health_week') || 'null') } catch { return null }
   })
 
   useEffect(() => {
     if (!linked) return
     fetch('/api/oura/week?days=30')
       .then(r => r.json())
-      .then(j => { if (!j.error) { setData(j); localStorage.setItem('aaron_health_week', JSON.stringify(j)) } })
+      .then(j => { if (!j.error) { setData(j); ls.set('aaron_health_week', JSON.stringify(j)) } })
       .catch(() => {})
   }, [linked])
 
@@ -311,12 +312,12 @@ function DateNav({ date, setDate, onSync, syncing }) {
 function VerseCard() {
   const cacheKey = `verse_${todayStr()}`
   const [verse, setVerse] = useState(() => {
-    try { return JSON.parse(localStorage.getItem(cacheKey) || 'null') } catch { return null }
+    try { return JSON.parse(ls.get(cacheKey) || 'null') } catch { return null }
   })
   useEffect(() => {
     if (verse) return
     fetch('/api/verse').then(r => r.json()).then(j => {
-      if (j.text) { setVerse(j); localStorage.setItem(cacheKey, JSON.stringify(j)) }
+      if (j.text) { setVerse(j); ls.set(cacheKey, JSON.stringify(j)) }
     }).catch(() => {})
   }, []) // eslint-disable-line
   if (!verse) return null
@@ -333,20 +334,20 @@ function VerseCard() {
 
 function CatholicCard() {
   const cacheKey = `catholic_${todayStr()}`
-  const [data, setData]       = useState(() => { try { return JSON.parse(localStorage.getItem(cacheKey) || 'null') } catch { return null } })
+  const [data, setData]       = useState(() => { try { return JSON.parse(ls.get(cacheKey) || 'null') } catch { return null } })
   const [loading, setLoading] = useState(!data)
   const [err, setErr]         = useState(null)
 
   useEffect(() => {
     // Clear cache if old format (has no gospel.excerpt at top level)
-    if (data && data.dayTitle === 'Daily Scripture') { setData(null); localStorage.removeItem(cacheKey); return }
+    if (data && data.dayTitle === 'Daily Scripture') { setData(null); ls.remove(cacheKey); return }
     if (data) return
     fetch('/api/catholic')
       .then(r => r.json())
       .then(j => {
         if (j.error) { setErr(j.error); return }
         setData(j)
-        localStorage.setItem(cacheKey, JSON.stringify(j))
+        ls.set(cacheKey, JSON.stringify(j))
       })
       .catch(e => setErr(e.message))
       .finally(() => setLoading(false))
@@ -1038,6 +1039,19 @@ function PlanDayLogger({ plans, date, onSave, onAutoSave, onDone, saving, onCanc
 
   return (
     <div>
+      <div className="gym-logged-header" style={{ paddingLeft: 0, paddingRight: 0, paddingTop: 0 }}>
+        <div>
+          <span className="gym-logged-title">Log Workout</span>
+          {day && <span className="gym-logged-sub">{day.day_name}</span>}
+        </div>
+        <div className="wc-actions" style={{ marginTop: 0 }}>
+          {autoSaveStatus === 'saving' && <span className="autosave-status">Saving…</span>}
+          {autoSaveStatus === 'saved'  && <span className="autosave-status autosave-status--saved">Saved ✓</span>}
+          <CancelBtn onClick={onCancel} />
+          {day && <SaveBtn onClick={handleSave} disabled={saving} />}
+        </div>
+      </div>
+
       <div className="gym-log-section">
         <span className="gym-log-label">Plan</span>
         <div className="gym-chips">
@@ -1074,19 +1088,9 @@ function PlanDayLogger({ plans, date, onSave, onAutoSave, onDone, saving, onCanc
           <textarea className="form-input form-textarea" placeholder="Session notes (optional)…"
             value={notes} onChange={e => setNotes(e.target.value)} style={{ marginTop: 8 }} />
           {err && <p className="form-error">{err}</p>}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8 }}>
-            <button className="connect-btn health-connect-btn" onClick={handleSave} disabled={saving} style={{ margin: 0 }}>
-              {saving ? 'Saving…' : autoSavedIdRef.current ? 'Done' : 'Save Session'}
-            </button>
-            {autoSaveStatus === 'saving' && <span className="autosave-status">Saving…</span>}
-            {autoSaveStatus === 'saved'  && <span className="autosave-status autosave-status--saved">Saved ✓</span>}
-          </div>
         </div>
       )}
 
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 4 }}>
-        <CancelBtn onClick={onCancel} />
-      </div>
     </div>
   )
 }
@@ -1196,8 +1200,19 @@ function CustomLogger({ date, onSave, onAutoSave, onDone, saving, onCancel, init
 
   return (
     <div>
-      <input className="form-input cl-title" placeholder="Workout title (e.g. Push Day)"
-        value={dayName} onChange={e => setDayName(e.target.value)} />
+      <div className="gym-logged-header" style={{ paddingLeft: 0, paddingRight: 0, paddingTop: 0 }}>
+        <span className="gym-logged-title">{isEditing ? 'Edit Workout' : 'Custom Workout'}</span>
+        <div className="wc-actions" style={{ marginTop: 0 }}>
+          {autoSaveStatus === 'saving' && <span className="autosave-status">Saving…</span>}
+          {autoSaveStatus === 'saved'  && <span className="autosave-status autosave-status--saved">Saved ✓</span>}
+          <CancelBtn onClick={onCancel} />
+          <SaveBtn onClick={handleSave} disabled={saving} />
+        </div>
+      </div>
+      <div style={{ marginBottom: 12 }}>
+        <input className="form-input cl-title" style={{ margin: 0 }} placeholder="Workout title (e.g. Push Day)"
+          value={dayName} onChange={e => setDayName(e.target.value)} />
+      </div>
 
       {exercises.map((ex, i) => {
         const isOpen = openExs.has(i)
@@ -1277,16 +1292,6 @@ function CustomLogger({ date, onSave, onAutoSave, onDone, saving, onCancel, init
       <textarea className="form-input form-textarea" placeholder="Session notes (optional)…"
         value={notes} onChange={e => setNotes(e.target.value)} style={{ marginTop: 8 }} />
       {err && <p className="form-error">{err}</p>}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8 }}>
-        <button className="connect-btn health-connect-btn" onClick={handleSave} disabled={saving} style={{ margin: 0 }}>
-          {saving ? 'Saving…' : autoSavedIdRef.current ? 'Done' : 'Save Session'}
-        </button>
-        {autoSaveStatus === 'saving' && <span className="autosave-status">Saving…</span>}
-        {autoSaveStatus === 'saved'  && <span className="autosave-status autosave-status--saved">Saved ✓</span>}
-      </div>
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 4 }}>
-        <CancelBtn onClick={onCancel} />
-      </div>
 
       {dragState && createPortal(
         <div ref={ghostElRef} className="pdb-ghost"
@@ -1968,7 +1973,7 @@ function ConnectScreen({ onConnect, loading, error }) {
 
 export default function Health() {
   const [tab,            setTab]           = useState('today')
-  const [linked,         setLinked]        = useState(() => !!localStorage.getItem('aaron_oura_linked'))
+  const [linked,         setLinked]        = useState(() => !!ls.get('aaron_oura_linked'))
   const [connectLoading, setConnectLoading] = useState(false)
   const [connectError,   setConnectError]   = useState(null)
   const [date,           setDate]           = useState(todayStr())
@@ -1980,8 +1985,8 @@ export default function Health() {
   // Always verify connection on mount so all devices stay in sync
   useEffect(() => {
     fetch('/api/oura/status').then(r => r.json()).then(d => {
-      if (d.linked) { localStorage.setItem('aaron_oura_linked', '1'); setLinked(true) }
-      else { localStorage.removeItem('aaron_oura_linked'); setLinked(false) }
+      if (d.linked) { ls.set('aaron_oura_linked', '1'); setLinked(true) }
+      else { ls.remove('aaron_oura_linked'); setLinked(false) }
     }).catch(() => {})
   }, []) // eslint-disable-line
 
@@ -1991,7 +1996,7 @@ export default function Health() {
       const res  = await fetch('/api/oura/connect', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token }) })
       const json = await res.json()
       if (json.error) throw new Error(json.error)
-      localStorage.setItem('aaron_oura_linked', '1')
+      ls.set('aaron_oura_linked', '1')
       setLinked(true)
     } catch (e) { setConnectError(e.message) }
     finally { setConnectLoading(false) }

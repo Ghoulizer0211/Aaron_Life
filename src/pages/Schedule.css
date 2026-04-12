@@ -185,11 +185,127 @@
   inset: 0;
   width: 100%;
   height: 100%;
-  opacity: 0;
+  opacity: 0.001; /* must be >0 for iOS to treat it as tappable */
   cursor: pointer;
   color-scheme: dark;
-  -webkit-appearance: none;
-  appearance: none;
+  /* no appearance:none — removing it keeps the native picker alive on iOS */
+  z-index: 1;
+}
+
+/* ── Mini calendar dropdown (custom mobile date picker) ────────────────────── */
+
+.mini-cal-picker {
+  position: fixed;
+  z-index: 500;
+  background: #0d1117;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 14px 12px 12px;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.6);
+  width: 280px;
+  touch-action: manipulation;
+}
+
+.mcp-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.mcp-selects {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.mcp-select {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-family: 'Exo 2', sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  padding: 3px 4px;
+  color-scheme: dark;
+  cursor: pointer;
+}
+
+.mcp-nav {
+  font-size: 22px;
+  line-height: 1;
+  padding: 2px 10px;
+  border-radius: 8px;
+  color: var(--accent);
+  transition: background 0.12s;
+}
+.mcp-nav:active { background: rgba(0,229,255,0.12); }
+
+.mcp-dow-row {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.mcp-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px;
+}
+
+.mcp-day {
+  aspect-ratio: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  font-size: 13px;
+  color: var(--text-primary);
+  transition: background 0.12s;
+}
+.mcp-day:active { background: rgba(255,255,255,0.08); }
+
+.mcp-today {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.mcp-selected {
+  background: var(--accent) !important;
+  color: #000 !important;
+  font-weight: 700;
+}
+
+/* Mobile: one-row nav — date picker left, toggles far right */
+.week-nav-mobile {
+  justify-content: flex-start;
+  gap: 4px;
+  padding: 8px 10px;
+}
+.week-nav-mobile .wnav-date-wrap {
+  flex-shrink: 0;
+}
+.week-nav-mobile .wnav-range {
+  font-size: 13px;
+  white-space: nowrap;
+}
+.week-nav-mobile .vt-btn {
+  padding: 4px 10px;
+  font-size: 16px;
+}
+
+/* Day/Month/+ group — pushed to far right */
+.wnav-view-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  flex-shrink: 0;
 }
 
 /* ── Grid wrapper ──────────────────────────────────────────────────────────── */
@@ -283,7 +399,7 @@
   overflow-y: auto;
   overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
-  padding-bottom: calc(var(--nav-height) + env(safe-area-inset-bottom, 0px) + 60px);
+  padding-bottom: 50px;
 }
 
 /* ── Inner flex layout: time col + day cols ────────────────────────────────── */
@@ -562,6 +678,12 @@
 
 .modal-title { font-size: 17px; font-weight: 600; color: var(--text-primary); }
 
+.modal-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .modal-close {
   width: 30px; height: 30px;
   border-radius: 50%;
@@ -570,6 +692,17 @@
   color: var(--text-secondary);
 }
 .modal-close svg { width: 14px; height: 14px; }
+
+.modal-save {
+  width: 30px; height: 30px;
+  border-radius: 50%;
+  background: rgba(0, 255, 157, 0.15);
+  border: 1px solid var(--green);
+  display: flex; align-items: center; justify-content: center;
+  color: var(--green);
+}
+.modal-save svg { width: 14px; height: 14px; }
+.modal-save:active { background: rgba(0, 255, 157, 0.28); }
 
 .modal-body {
   flex: 1;
@@ -630,7 +763,7 @@
 .color-row { display: flex; gap: 10px; flex-wrap: wrap; }
 
 .swatch {
-  width: 32px; height: 32px;
+  width: 18px; height: 18px;
   border-radius: 50%;
   border: 2px solid transparent;
   transition: transform 0.15s, border-color 0.15s;
@@ -671,6 +804,14 @@
   border: 1px solid rgba(224,92,92,0.25);
 }
 .btn-delete:active { background: rgba(224,92,92,0.22); }
+
+.btn-delete--sm {
+  padding: 5px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: inherit;
+}
 
 .btn-unschedule {
   padding: 14px 18px;
@@ -713,6 +854,11 @@
   border-color: color-mix(in srgb, var(--tmc) 60%, transparent);
 }
 
+/* ── Mobile overrides ───────────────────────────────────────────────────────── */
+
+/* Hide the day-of-week header row in day view — date is shown in the nav bar */
+html:not(.is-desktop) .week-header { display: none; }
+
 /* ── Desktop overrides ─────────────────────────────────────────────────────── */
 
 html.is-desktop .schedule-page  { --time-w: 64px; }
@@ -723,7 +869,7 @@ html.is-desktop .now-time-label { font-size: 17px; }
 html.is-desktop .week-nav       { display: none; }
 html.is-desktop .wnav-range     { font-size: 22px; }
 
-html.is-desktop .week-body      { padding-bottom: 80px; }
+html.is-desktop .week-body      { padding-bottom: 40px; }
 
 html.is-desktop .ce-title       { font-size: 14px; white-space: normal; word-break: break-word; text-overflow: unset; }
 html.is-desktop .ce-time        { font-size: 12px; }
@@ -774,7 +920,7 @@ html.is-desktop .modal-sheet    { border-radius: 16px; max-height: 80dvh; max-wi
   display: flex;
   flex-direction: column;
   overflow-y: auto;
-  padding-bottom: calc(var(--nav-height) + env(safe-area-inset-bottom, 0px) + 60px);
+  padding-bottom: 20px;
 }
 
 .month-dow-row {
@@ -971,15 +1117,6 @@ html.is-desktop .vt-btn        { font-size: 14px; padding: 6px 20px; }
   flex-shrink: 0;
 }
 .tp-title { font-size: 14px; font-weight: 700; color: var(--text-primary); letter-spacing: 0.3px; text-transform: uppercase; }
-.tp-add-btn {
-  width: 28px; height: 28px; border-radius: 8px;
-  background: var(--accent-dim); color: var(--accent);
-  display: flex; align-items: center; justify-content: center;
-  transition: background 0.15s;
-}
-.tp-add-btn svg { width: 16px; height: 16px; }
-.tp-add-btn:hover { background: rgba(0,229,255,0.15); }
-.tp-add-btn:active { opacity: 0.7; }
 
 .tp-filters {
   display: flex; gap: 0;
@@ -1696,15 +1833,17 @@ html.is-desktop .vt-btn        { font-size: 14px; padding: 6px 20px; }
 }
 
 .ht-edit-btn {
-  width: 28px; height: 28px;
+  width: 44px; height: 44px;
   display: flex; align-items: center; justify-content: center;
-  color: var(--text-muted);
+  color: var(--accent);
   border-radius: 8px;
   -webkit-tap-highlight-color: transparent;
   flex-shrink: 0;
-  transition: color 0.15s, background 0.15s;
+  transition: color 0.15s, background 0.15s, opacity 0.15s;
+  opacity: 0;
 }
-.ht-edit-btn:hover { color: var(--accent); background: var(--accent-dim); }
+.ht-row:hover .ht-edit-btn { opacity: 1; }
+.ht-edit-btn:hover { background: var(--accent-dim); }
 .ht-edit-btn svg { width: 16px; height: 16px; }
 
 .ht-save-btn, .ht-cancel-btn, .ht-delete-btn {
@@ -1855,6 +1994,11 @@ html.is-desktop .vt-btn        { font-size: 14px; padding: 6px 20px; }
   font-size: 18px; font-weight: 400;
   color: var(--text-primary);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+.tl-name-clickable {
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .tl-prio-badge {
@@ -2108,13 +2252,6 @@ html.is-desktop .vt-btn        { font-size: 14px; padding: 6px 20px; }
   color: var(--text-primary); font-family: inherit;
 }
 .tl-cl-input:focus { border-color: var(--accent); outline: none; }
-.tl-cl-add-btn {
-  width: 22px; height: 22px; border-radius: 5px;
-  background: rgba(0,229,255,0.12); color: var(--accent);
-  font-size: 16px; line-height: 1;
-  display: flex; align-items: center; justify-content: center;
-  cursor: pointer; flex-shrink: 0;
-}
 .tl-cl-badge {
   font-size: 10px; font-weight: 700;
   color: var(--text-muted);
@@ -2156,13 +2293,6 @@ html.is-desktop .vt-btn        { font-size: 14px; padding: 6px 20px; }
   padding: 2px 4px; font-size: 15px;
   color: var(--text-primary); font-family: inherit;
   outline: none;
-}
-.tm-cl-add-btn {
-  width: 36px; height: 36px; border-radius: 8px;
-  background: rgba(0,229,255,0.12); color: var(--accent);
-  font-size: 22px; line-height: 1;
-  display: flex; align-items: center; justify-content: center;
-  cursor: pointer; flex-shrink: 0;
 }
 
 .tl-edit-title-row {
@@ -2223,3 +2353,164 @@ html.is-desktop .vt-btn        { font-size: 14px; padding: 6px 20px; }
   border-radius: 3px; padding: 1px 4px;
 }
 .tl-due-over { color: var(--red); background: rgba(255,56,100,0.12); }
+
+/* ── Mobile: scheduling mode banner ─────────────────────────────────────────── */
+
+.ms-scheduling-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 14px;
+  background: rgba(0, 229, 255, 0.1);
+  border-bottom: 1px solid var(--accent);
+  font-size: 13px;
+  color: var(--text-primary);
+  flex-shrink: 0;
+}
+
+.ms-sched-cancel {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--red);
+  background: rgba(255, 56, 100, 0.12);
+  border-radius: 6px;
+  padding: 4px 10px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* ── Mobile: expandable bottom panel ────────────────────────────────────────── */
+
+.ms-bottom-panel {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 42px;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-secondary);
+  border-top: 1px solid var(--border);
+  overflow: hidden;
+  height: 50px;
+  transition: height 0.35s cubic-bezier(0.32, 0.72, 0, 1);
+  z-index: 50;
+}
+
+.ms-bottom-panel.ms-panel-open {
+  /* header (safe-top + ~50px) + week-nav (~50px) + bottom-bar (42px) */
+  height: calc(100dvh - var(--safe-top) - 150px);
+}
+
+/* Handle — different layout when open vs closed */
+.ms-panel-handle {
+  flex-shrink: 0;
+  height: 50px;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  padding: 0 18px;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  gap: 8px;
+}
+
+/* Closed: "Habits & Tasks" left  +  "↑ slide up" right */
+.ms-panel-handle.ms-handle-closed {
+  justify-content: space-between;
+}
+
+/* Open: fully collapse — pip lives on the tab bar instead */
+.ms-panel-handle.ms-handle-open {
+  height: 0 !important;
+  padding: 0 !important;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.ms-panel-pip {
+  width: 36px;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255,255,255,0.2);
+  flex-shrink: 0;
+}
+
+.ms-panel-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.ms-panel-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+}
+
+.ms-panel-chevron {
+  width: 16px;
+  height: 16px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+/* ── Mobile TaskPanel (mobileMode) ──────────────────────────────────────────── */
+
+.mp-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.mp-tabs {
+  display: flex;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--border);
+  position: relative;
+  padding-top: 6px;
+}
+
+/* Drag pip sits above the tab labels */
+.mp-tabs::before {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 36px;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.mp-tab {
+  flex: 1;
+  padding: 8px 6px;
+  font-size: 15px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.25);
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  border-bottom: 2px solid transparent;
+  transition: color 0.15s, border-color 0.15s;
+  -webkit-tap-highlight-color: transparent;
+  font-family: 'Orbitron', sans-serif;
+}
+
+.mp-tab-active {
+  color: #ffffff;
+  border-bottom-color: var(--accent);
+}
+
+.mp-content {
+  flex: 1;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  min-height: 0;
+}

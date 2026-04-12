@@ -1,7 +1,10 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { supabase, sb } from '../lib/supabase'
+import { ls } from '../lib/storage'
 import TaskPanel from './TaskPanel'
+import { AddBtn } from '../components/IconButtons'
+import '../components/IconButtons.css'
 import './Page.css'
 import './Schedule.css'
 
@@ -68,13 +71,13 @@ function slotToTime(h, m) {
 
 function slotLabel(h, m) {
   if (m !== 0) return ''
-  return `${h % 12 || 12} ${h >= 12 ? 'PM' : 'AM'}`
+  return `${String(h).padStart(2,'0')}:00`
 }
 
 function fmt12(t) {
   if (!t) return ''
   const [h, m] = t.split(':').map(Number)
-  return `${h % 12 || 12}:${String(m).padStart(2,'0')} ${h >= 12 ? 'PM' : 'AM'}`
+  return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`
 }
 
 function getEventColor(ev) {
@@ -149,18 +152,18 @@ function evToDb({ id, title, date, color, location, notes, startTime, endTime })
 function useEvents() {
   const [events, setEvents] = useState(() => {
     if (supabase) return []
-    try { return JSON.parse(localStorage.getItem('aaron_life_events') || '[]') }
+    try { return JSON.parse(ls.get('aaron_life_events') || '[]') }
     catch { return [] }
   })
 
   const save = (list) => {
-    localStorage.setItem('aaron_life_events', JSON.stringify(list))
+    ls.set('aaron_life_events', JSON.stringify(list))
     return list
   }
 
   useEffect(() => {
     if (supabase) {
-      localStorage.removeItem('aaron_life_events')
+      ls.remove('aaron_life_events')
       sb(supabase.from('events').select('*').order('date'))
         .then(({ data } = {}) => { if (Array.isArray(data)) setEvents(data.map(evFromDb)) })
 
@@ -212,10 +215,10 @@ function useTasks() {
   const [tasks, setTasks] = useState(() => {
     if (supabase) return []
     try {
-      const raw = localStorage.getItem('aaron_tasks')
+      const raw = ls.get('aaron_tasks')
       if (raw) return JSON.parse(raw)
       // Migrate from old aaron_todos if present
-      const old = localStorage.getItem('aaron_todos')
+      const old = ls.get('aaron_todos')
       if (old) {
         const todos = JSON.parse(old)
         const migrated = todos.map(t => ({
@@ -233,7 +236,7 @@ function useTasks() {
           scheduled_start: null,
           scheduled_end: null,
         }))
-        localStorage.setItem('aaron_tasks', JSON.stringify(migrated))
+        ls.set('aaron_tasks', JSON.stringify(migrated))
         return migrated
       }
     } catch {}
@@ -251,7 +254,7 @@ function useTasks() {
 
   }, [])
 
-  const save = (list) => { localStorage.setItem('aaron_tasks', JSON.stringify(list)); return list }
+  const save = (list) => { ls.set('aaron_tasks', JSON.stringify(list)); return list }
 
   const addTask = (d) => {
     const task = {
@@ -861,11 +864,35 @@ function EventModal({ initial, onSave, onDelete, onClose }) {
         <div className="modal-handle" />
         <div className="modal-header">
           <span className="modal-title">{isEdit ? 'Edit Event' : 'New Event'}</span>
-          <button className="modal-close" onClick={onClose}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-              <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
-            </svg>
-          </button>
+          <div className="modal-header-actions">
+            {isEdit ? (
+              <>
+                <button className="ib-btn ib-delete" onClick={() => onDelete(initial.id)}>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/>
+                  </svg>
+                </button>
+                <button className="ib-btn ib-save" onClick={handleSave}>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="20 6 9 17 4 12"/>
+                  </svg>
+                </button>
+              </>
+            ) : (
+              <>
+                <button className="ib-btn ib-cancel" onClick={onClose}>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                    <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+                  </svg>
+                </button>
+                <button className="ib-btn ib-save" onClick={handleSave}>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="20 6 9 17 4 12"/>
+                  </svg>
+                </button>
+              </>
+            )}
+          </div>
         </div>
 
         <div className="modal-body">
@@ -939,10 +966,6 @@ function EventModal({ initial, onSave, onDelete, onClose }) {
           </div>
         </div>
 
-        <div className="modal-footer">
-          {isEdit && <button className="btn-delete" onClick={() => onDelete(initial.id)}>Delete</button>}
-          <button className="btn-save" onClick={handleSave}>{isEdit ? 'Save Changes' : 'Add Event'}</button>
-        </div>
       </div>
     </div>,
     document.body
@@ -1042,11 +1065,25 @@ function TaskModal({ task, onSave, onDelete, onClose }) {
         <div className="modal-handle" />
         <div className="modal-header">
           <span className="modal-title">Edit Task</span>
-          <button className="modal-close" onClick={onClose}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-              <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
-            </svg>
-          </button>
+          <div className="modal-header-actions">
+            <button className="ib-btn ib-delete" onClick={() => {
+              onSave(task.id, {
+                title, priority: prio, due_date: due || null,
+                scheduled_date: null, scheduled_start: null, scheduled_end: null,
+                duration: dur ? parseInt(dur) : 0, notes: notes || null, checklist,
+              })
+              onClose()
+            }}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/>
+              </svg>
+            </button>
+            <button className="ib-btn ib-save" onClick={handleSave}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="20 6 9 17 4 12"/>
+              </svg>
+            </button>
+          </div>
         </div>
 
         <div className="modal-body">
@@ -1162,26 +1199,16 @@ function TaskModal({ task, onSave, onDelete, onClose }) {
                   onChange={e => setNewItem(e.target.value)}
                   onKeyDown={e => { if (e.key === 'Enter') addItem() }}
                 />
-                <button className="tm-cl-add-btn" onClick={addItem}>+</button>
+                <button className="ib-btn ib-add" onClick={addItem} style={{ width: 32, height: 32, borderRadius: 8 }}>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" width="16" height="16">
+                    <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+                  </svg>
+                </button>
               </div>
             </div>
           </div>
         </div>
 
-        <div className="modal-footer">
-          <button className="btn-delete" onClick={() => { onDelete(task.id); onClose() }}>Delete</button>
-          {task.scheduled_date && (
-            <button className="btn-unschedule" onClick={() => {
-              onSave(task.id, {
-                title, priority: prio, due_date: due || null,
-                scheduled_date: null, scheduled_start: null, scheduled_end: null,
-                duration: dur ? parseInt(dur) : 0, notes: notes || null,
-              })
-              onClose()
-            }}>Unschedule</button>
-          )}
-          <button className="btn-save" onClick={handleSave}>Save Changes</button>
-        </div>
       </div>
     </div>,
     document.body
@@ -1264,6 +1291,105 @@ function MonthGrid({ monthOffset, events, tasks, onDayClick, onEventClick }) {
   )
 }
 
+// ─── Mini calendar dropdown (mobile date picker) ──────────────────────────────
+
+const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December']
+const DOW_LABELS  = ['Su','Mo','Tu','We','Th','Fr','Sa']
+const YEAR_RANGE  = Array.from({ length: 10 }, (_, i) => new Date().getFullYear() - 2 + i)
+
+function MiniCalPicker({ anchorRect, anchorRef, value, onSelect, onClose }) {
+  const [viewDate, setViewDate] = useState(() => {
+    const d = value ? new Date(value + 'T00:00:00') : new Date()
+    return new Date(d.getFullYear(), d.getMonth(), 1)
+  })
+  const ref = useRef(null)
+
+  // Close on outside tap — but NOT when tapping the anchor button (let the toggle handle that)
+  useEffect(() => {
+    const handler = (e) => {
+      if (ref.current && !ref.current.contains(e.target) &&
+          !(anchorRef?.current && anchorRef.current.contains(e.target))) {
+        onClose()
+      }
+    }
+    document.addEventListener('mousedown', handler, true)
+    document.addEventListener('touchstart', handler, true)
+    return () => {
+      document.removeEventListener('mousedown', handler, true)
+      document.removeEventListener('touchstart', handler, true)
+    }
+  }, [onClose, anchorRef])
+
+  const today = todayStr()
+  const year  = viewDate.getFullYear()
+  const month = viewDate.getMonth()
+
+  const firstDow  = new Date(year, month, 1).getDay()
+  const daysInMon = new Date(year, month + 1, 0).getDate()
+
+  const cells = []
+  for (let i = 0; i < firstDow; i++) cells.push(null)
+  for (let d = 1; d <= daysInMon; d++) cells.push(d)
+
+  const mkDs = (day) => `${year}-${String(month+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`
+
+  // Position: just below the anchor button, horizontally centred under it
+  const left = Math.max(6, Math.min(
+    (anchorRect.left + anchorRect.right) / 2 - 140,
+    window.innerWidth - 286
+  ))
+  const top = anchorRect.bottom + 6
+
+  return createPortal(
+    <div
+      ref={ref}
+      className="mini-cal-picker"
+      style={{ top, left }}
+      onMouseDown={e => e.stopPropagation()}
+    >
+      <div className="mcp-header">
+        <button className="mcp-nav" onClick={() => setViewDate(new Date(year, month - 1, 1))}>‹</button>
+        <div className="mcp-selects">
+          <select
+            className="mcp-select"
+            value={month}
+            onChange={e => setViewDate(new Date(year, +e.target.value, 1))}
+          >
+            {MONTH_NAMES.map((n, i) => <option key={n} value={i}>{n}</option>)}
+          </select>
+          <select
+            className="mcp-select"
+            value={year}
+            onChange={e => setViewDate(new Date(+e.target.value, month, 1))}
+          >
+            {YEAR_RANGE.map(y => <option key={y} value={y}>{y}</option>)}
+          </select>
+        </div>
+        <button className="mcp-nav" onClick={() => setViewDate(new Date(year, month + 1, 1))}>›</button>
+      </div>
+      <div className="mcp-dow-row">
+        {DOW_LABELS.map(d => <span key={d}>{d}</span>)}
+      </div>
+      <div className="mcp-grid">
+        {cells.map((day, i) => {
+          if (!day) return <span key={`b${i}`} />
+          const dateStr = mkDs(day)
+          const isToday    = dateStr === today
+          const isSelected = dateStr === value
+          return (
+            <button
+              key={dateStr}
+              className={`mcp-day${isToday ? ' mcp-today' : ''}${isSelected ? ' mcp-selected' : ''}`}
+              onClick={() => { onSelect(dateStr); onClose() }}
+            >{day}</button>
+          )
+        })}
+      </div>
+    </div>,
+    document.body
+  )
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 export default function Schedule() {
@@ -1288,23 +1414,80 @@ export default function Schedule() {
   // Task being dragged from panel to calendar
   const [draggingTask, setDraggingTask] = useState(null)
 
-  // Mobile planner bottom sheet
-  const [showPlanner, setShowPlanner] = useState(false)
-  const sheetRef  = useRef(null)
-  const dragY     = useRef(null)
+  // Mobile task-to-schedule mode
+  const [schedulingTask, setSchedulingTask] = useState(null)
 
-  const closePlanner = useCallback(() => setShowPlanner(false), [])
+  // Collapse panel and enter scheduling mode on long-press
+  const handleMobileLongPress = (task) => {
+    setSchedulingTask(task)
+    setPanelExpanded(false)
+  }
 
-  // Swipe-down to close the sheet
-  const onSheetTouchStart = useCallback((e) => {
-    dragY.current = e.touches[0].clientY
+  // When scheduling mode is active, tapping a calendar slot schedules the task
+  const handleMobileCellClick = (dateStr, startTime, endTime) => {
+    if (schedulingTask) {
+      const dur = schedulingTask.duration || 60
+      const [sh, sm] = startTime.split(':').map(Number)
+      const endMin = sh * 60 + sm + dur
+      const et = endMin <= 1440
+        ? `${String(Math.floor(endMin / 60)).padStart(2,'0')}:${String(endMin % 60).padStart(2,'0')}`
+        : '23:59'
+      handleTaskSchedule(schedulingTask.id, dateStr, startTime, et)
+      setSchedulingTask(null)
+    } else {
+      openAdd(dateStr, startTime, endTime)
+    }
+  }
+
+  // Mobile calendar date picker dropdown
+  const [mobileCalOpen,  setMobileCalOpen]  = useState(false)
+  const [mobileCalRect,  setMobileCalRect]  = useState(null)
+  const calAnchorRef = useRef(null)
+
+  const openMobileCal = () => {
+    if (mobileCalOpen) { setMobileCalOpen(false); return }
+    const rect = calAnchorRef.current?.getBoundingClientRect()
+    if (rect) { setMobileCalRect(rect); setMobileCalOpen(true) }
+  }
+
+  // Mobile bottom panel (habits & tasks)
+  const [panelExpanded, setPanelExpanded] = useState(false)
+  const panelRef        = useRef(null)
+  const panelDragY     = useRef(null)
+  const panelDragH     = useRef(null)
+
+  const onPanelTouchStart = useCallback((e) => {
+    const el = panelRef.current
+    if (!el) return
+    panelDragY.current = e.touches[0].clientY
+    panelDragH.current = el.getBoundingClientRect().height
+    el.style.transition = 'none'
   }, [])
-  const onSheetTouchMove = useCallback((e) => {
-    if (dragY.current === null) return
-    const dy = e.touches[0].clientY - dragY.current
-    if (dy > 60) { dragY.current = null; closePlanner() }
-  }, [closePlanner])
-  const onSheetTouchEnd = useCallback(() => { dragY.current = null }, [])
+
+  const onPanelTouchMove = useCallback((e) => {
+    if (panelDragY.current === null) return
+    const el = panelRef.current
+    if (!el) return
+    const dy = e.touches[0].clientY - panelDragY.current
+    const navH   = 42
+    const minH   = 50
+    const maxH   = window.innerHeight - navH - 140
+    const newH   = Math.max(minH, Math.min(maxH, panelDragH.current - dy))
+    el.style.height = newH + 'px'
+  }, [])
+
+  const onPanelTouchEnd = useCallback(() => {
+    const el = panelRef.current
+    if (!el || panelDragY.current === null) return
+    el.style.transition = ''
+    el.style.height = ''
+    const h = el.getBoundingClientRect().height
+    const navH = 42
+    const maxH = window.innerHeight - navH - 140
+    setPanelExpanded(h > (maxH * 0.4))
+    panelDragY.current = null
+    panelDragH.current = null
+  }, [])
 
   useEffect(() => {
     const handler = () => {
@@ -1327,6 +1510,21 @@ export default function Schedule() {
     return view === 'day' ? dayLabel(days[0]) : weekRangeLabel(days)
   }
 
+  // Shorter label for mobile nav (no year in day view)
+  const navLabelMobile = () => {
+    if (view === 'month') {
+      const now = new Date()
+      const m = new Date(now.getFullYear(), now.getMonth() + monthOffset, 1)
+      return `${MONTH_SHORT[m.getMonth()]} ${m.getFullYear()}`
+    }
+    if (view === 'day') {
+      const d = days[0]
+      return `${DAY_SHORT[d.getDay()]}, ${MONTH_SHORT[d.getMonth()]} ${d.getDate()}`
+    }
+    return weekRangeLabel(days)
+  }
+
+
   const isAtToday = view === 'month' ? monthOffset === 0
     : view === 'day' ? dayOffset === 0 : weekOffset === 0
 
@@ -1342,8 +1540,7 @@ export default function Schedule() {
   }
   const goToday = () => { setDayOffset(0); setWeekOffset(0); setMonthOffset(0) }
 
-  const handleDatePick = (e) => {
-    const val = e.target.value
+  const navigateToDate = (val) => {
     if (!val) return
     const picked = new Date(val + 'T00:00:00')
     const today  = new Date(); today.setHours(0, 0, 0, 0)
@@ -1359,6 +1556,8 @@ export default function Schedule() {
       setWeekOffset(Math.round((pickedMon - thisMon) / (7 * 86400000)))
     }
   }
+
+  const handleDatePick = (e) => navigateToDate(e.target.value)
 
   const handleMonthDayClick = (ds) => {
     const picked = new Date(ds + 'T00:00:00')
@@ -1427,6 +1626,149 @@ export default function Schedule() {
     }
   }
 
+  // ── Mobile layout ─────────────────────────────────────────────────────────
+  if (isMobile) {
+    return (
+      <div className="schedule-page">
+
+        {/* Date nav + view toggles — all one row on mobile */}
+        <div className="week-nav week-nav-mobile">
+          <button className="wnav-btn" onClick={goPrev}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="15 18 9 12 15 6"/>
+            </svg>
+          </button>
+          <div className="wnav-date-wrap" ref={calAnchorRef}>
+            <span className="wnav-range wnav-date-btn" onClick={openMobileCal}>
+              {navLabelMobile()}
+              <svg className="wnav-cal-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
+              </svg>
+            </span>
+          </div>
+          {mobileCalOpen && mobileCalRect && (
+            <MiniCalPicker
+              anchorRect={mobileCalRect}
+              anchorRef={calAnchorRef}
+              value={pickerValue}
+              onSelect={navigateToDate}
+              onClose={() => setMobileCalOpen(false)}
+            />
+          )}
+          {!isAtToday && (
+            <button className="wnav-today" onClick={goToday}>Today</button>
+          )}
+          <div className="wnav-view-group">
+            {['day', 'month'].map(v => (
+              <button key={v} className={`vt-btn${view === v ? ' vt-active' : ''}`} onClick={() => setView(v)}>
+                {v.charAt(0).toUpperCase() + v.slice(1)}
+              </button>
+            ))}
+            <AddBtn onClick={() => openAdd(todayStr(), '', '')} />
+          </div>
+          <button className="wnav-btn" onClick={goNext}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="9 18 15 12 9 6"/>
+            </svg>
+          </button>
+        </div>
+
+        {/* Scheduling mode banner */}
+        {schedulingTask && (
+          <div className="ms-scheduling-banner">
+            <span>Tap a time slot to schedule <strong>{schedulingTask.title}</strong></span>
+            <button className="ms-sched-cancel" onClick={() => setSchedulingTask(null)}>✕ Cancel</button>
+          </div>
+        )}
+
+        {/* Calendar — fills remaining space; fixed panel sits on top */}
+        <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden', paddingBottom: '50px' }}>
+          {view === 'month' ? (
+            <MonthGrid
+              monthOffset={monthOffset}
+              events={events}
+              tasks={tasks}
+              onDayClick={handleMonthDayClick}
+              onEventClick={openEdit}
+            />
+          ) : (
+            <WeekGrid
+              days={days}
+              events={events}
+              tasks={tasks}
+              draggingTask={draggingTask}
+              onCellClick={handleMobileCellClick}
+              onEventClick={openEdit}
+              onEventToggle={(id, done) => updateEvent(id, { done })}
+              onEventUpdate={updateEvent}
+              onTaskClick={handleTaskClick}
+              onTaskSchedule={handleTaskSchedule}
+              onTaskToggle={handleTaskToggle}
+            />
+          )}
+        </div>
+
+        {/* Expandable bottom panel — Habits & Tasks */}
+        <div ref={panelRef} className={`ms-bottom-panel${panelExpanded ? ' ms-panel-open' : ''}`}>
+          <div
+            className={`ms-panel-handle ${panelExpanded ? 'ms-handle-open' : 'ms-handle-closed'}`}
+            onTouchStart={onPanelTouchStart}
+            onTouchMove={onPanelTouchMove}
+            onTouchEnd={onPanelTouchEnd}
+          >
+            {panelExpanded ? (
+              <>
+                <span className="ms-panel-pip" />
+                <svg className="ms-panel-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="6 9 12 15 18 9"/>
+                </svg>
+              </>
+            ) : (
+              <>
+                <span className="ms-panel-label">Habits &amp; Tasks</span>
+                <span className="ms-panel-hint">↑ slide up</span>
+              </>
+            )}
+          </div>
+          <TaskPanel
+            mobileMode={true}
+            tasks={tasks}
+            events={events}
+            onAddTask={addTask}
+            onUpdateTask={handleTaskUpdate}
+            onDeleteTask={handleTaskDelete}
+            onTaskToggle={handleTaskToggle}
+            onDragStart={setDraggingTask}
+            onDragEnd={() => setDraggingTask(null)}
+            onMobileLongPress={handleMobileLongPress}
+            onDateClick={handleDateClick}
+            onPanelTouchStart={onPanelTouchStart}
+            onPanelTouchMove={onPanelTouchMove}
+            onPanelTouchEnd={onPanelTouchEnd}
+          />
+        </div>
+
+        {modal && (
+          <EventModal
+            initial={modal.initial}
+            onSave={handleSave}
+            onDelete={(id) => { deleteEvent(id); closeModal() }}
+            onClose={closeModal}
+          />
+        )}
+        {taskModal && (
+          <TaskModal
+            task={taskModal}
+            onSave={handleTaskUpdate}
+            onDelete={handleTaskDelete}
+            onClose={() => setTaskModal(null)}
+          />
+        )}
+      </div>
+    )
+  }
+
+  // ── Desktop layout ─────────────────────────────────────────────────────────
   return (
     <div className="schedule-page">
       <div className="sched-layout">
@@ -1527,37 +1869,7 @@ export default function Schedule() {
 
       </div>
 
-      {/* ── Mobile planner bottom sheet ── */}
-      {isMobile && showPlanner && createPortal(
-        <>
-          <div className="planner-overlay" onClick={closePlanner} />
-          <div
-            ref={sheetRef}
-            className="planner-sheet"
-            onTouchStart={onSheetTouchStart}
-            onTouchMove={onSheetTouchMove}
-            onTouchEnd={onSheetTouchEnd}
-          >
-            <div className="planner-handle-bar">
-              <span className="planner-handle" />
-            </div>
-            <TaskPanel
-              tasks={tasks}
-              events={events}
-              onAddTask={addTask}
-              onUpdateTask={handleTaskUpdate}
-              onDeleteTask={handleTaskDelete}
-              onTaskToggle={handleTaskToggle}
-              onDragStart={setDraggingTask}
-              onDragEnd={() => setDraggingTask(null)}
-              onDateClick={(d) => { handleDateClick(d); closePlanner() }}
-            />
-          </div>
-        </>,
-        document.body
-      )}
-
-      {/* FAB — add event */}
+      {/* FAB — add event (desktop) */}
       <button className="fab" onClick={() => openAdd(todayStr(), '', '')} aria-label="Add event">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
           <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
