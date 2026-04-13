@@ -142,11 +142,22 @@ function evFromDb(row) {
     color:     row.color      || COLOR_PRESETS[0],
     location:  row.location   || '',
     notes:     row.notes      || '',
+    done:      row.done       || false,
   }
 }
 
-function evToDb({ id, title, date, color, location, notes, startTime, endTime }) {
-  return { id, title, date, color, location, notes, start_time: startTime || null, end_time: endTime || null }
+function evToDb(ev) {
+  const out = {}
+  if (ev.id        !== undefined) out.id         = ev.id
+  if (ev.title     !== undefined) out.title      = ev.title
+  if (ev.date      !== undefined) out.date       = ev.date
+  if (ev.color     !== undefined) out.color      = ev.color
+  if (ev.location  !== undefined) out.location   = ev.location
+  if (ev.notes     !== undefined) out.notes      = ev.notes
+  if (ev.done      !== undefined) out.done       = ev.done
+  if (ev.startTime !== undefined) out.start_time = ev.startTime || null
+  if (ev.endTime   !== undefined) out.end_time   = ev.endTime   || null
+  return out
 }
 
 function useEvents() {
@@ -624,7 +635,7 @@ function WeekGrid({
         <div className="wh-corner" />
         {days.map((day, i) => {
           const isToday = dateToStr(day) === today
-          const dayTasks = tasks.filter(t => t.scheduled_date === dateToStr(day) && !t.done)
+          const dayTasks = tasks.filter(t => t.scheduled_date === dateToStr(day))
           return (
             <div key={i} className={`wh-day${isToday ? ' wh-today' : ''}`}>
               <span className="wh-dow">{DAY_SHORT[day.getDay()]}</span>
@@ -653,7 +664,7 @@ function WeekGrid({
                 {(() => {
                   const n = new Date()
                   const h = n.getHours(), m = n.getMinutes()
-                  return `${h % 12 || 12}:${String(m).padStart(2,'0')}`
+                  return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`
                 })()}
               </div>
             )}
@@ -680,11 +691,7 @@ function WeekGrid({
                   <div key={i} className={m === 0 ? 'g-hour' : 'g-half'} style={{ top: i * SLOT_H }} />
                 ))}
 
-                {isToday && (
-                  <div className="now-line" style={{ top: nowTop }}>
-                    <span className="now-dot" />
-                  </div>
-                )}
+                <div className={isToday ? 'now-line' : 'now-line-ghost'} style={{ top: nowTop }} />
 
                 {/* Drag overlay (event or calendar task) */}
                 {dragState && dragState.di === di && (
@@ -761,7 +768,7 @@ function WeekGrid({
                       style={{ top: m.top, height: m.height, cursor: task.done ? 'default' : 'grab', borderLeftColor: tColor, background: `${tColor}18` }}
                       onMouseDown={e => { if (!task.done) { e.stopPropagation(); handleTaskCalDragStart(e, task, di) } }}
                       onTouchStart={e => { if (!task.done) { e.stopPropagation(); handleTaskCalDragStart(e, task, di) } }}
-                      onClick={e => { e.stopPropagation(); if (!justDraggedRef.current) onTaskClick(task) }}
+                      onClick={e => { e.stopPropagation(); if (!justDraggedRef.current && !task.done) onTaskClick(task) }}
                     >
                       <button
                         className={`ct-check${task.done ? ' ct-check-on' : ''}`}
@@ -1217,7 +1224,7 @@ function TaskModal({ task, onSave, onDelete, onClose }) {
 
 // ─── Month Grid ───────────────────────────────────────────────────────────────
 
-function MonthGrid({ monthOffset, events, tasks, onDayClick, onEventClick }) {
+function MonthGrid({ monthOffset, events, tasks, onDayClick, onEventClick, onTaskClick }) {
   const today = todayStr()
   const now   = new Date()
   const month = new Date(now.getFullYear(), now.getMonth() + monthOffset, 1)
@@ -1250,7 +1257,7 @@ function MonthGrid({ monthOffset, events, tasks, onDayClick, onEventClick }) {
             const isToday = ds === today
             const inMonth = day.getMonth() === month.getMonth()
             const dayEvs  = events.filter(e => e.date === ds)
-            const dayTasks = tasks.filter(t => t.scheduled_date === ds && !t.done)
+            const dayTasks = tasks.filter(t => t.scheduled_date === ds)
             return (
               <div
                 key={di}
@@ -1258,30 +1265,46 @@ function MonthGrid({ monthOffset, events, tasks, onDayClick, onEventClick }) {
                 onClick={() => onDayClick(ds)}
               >
                 <span className="month-day-num">{day.getDate()}</span>
-                <div className="month-evs">
-                  {dayEvs.slice(0, 2).map(ev => (
-                    <div
-                      key={ev.id}
-                      className={`month-ev${ev.done ? ' month-ev-done' : ''}`}
-                      style={{ background: `${getEventColor(ev)}35`, borderLeftColor: getEventColor(ev) }}
-                      onClick={e => { e.stopPropagation(); onEventClick(ev) }}
-                    >
-                      {ev.title}
+                {(() => {
+                  const MAX = 3
+                  const evShow  = dayEvs.slice(0, Math.min(dayEvs.length, MAX))
+                  const remain  = MAX - evShow.length
+                  const tkShow  = dayTasks.slice(0, Math.max(0, remain))
+                  const hidden  = (dayEvs.length + dayTasks.length) - (evShow.length + tkShow.length)
+                  return (
+                    <div className="month-evs">
+                      {evShow.map(ev => {
+                        const c = getEventColor(ev)
+                        return (
+                          <div
+                            key={ev.id}
+                            className={`month-ev${ev.done ? ' month-ev-done' : ''}`}
+                            style={{ background: `${c}30`, borderLeftColor: c, color: c, opacity: ev.done ? 0.4 : 1, cursor: ev.done ? 'default' : 'pointer' }}
+                            onClick={e => { e.stopPropagation(); if (!ev.done) onEventClick(ev) }}
+                          >
+                            {ev.title}
+                          </div>
+                        )
+                      })}
+                      {tkShow.map(task => {
+                        const c = PRIORITY_COLOR[task.priority || 'medium']
+                        return (
+                          <div
+                            key={task.id}
+                            className={`month-ev${task.done ? ' month-ev-done' : ''}`}
+                            style={{ background: `${c}20`, borderLeftColor: c, color: c, opacity: task.done ? 0.4 : 1, cursor: task.done ? 'default' : 'pointer' }}
+                            onClick={e => { e.stopPropagation(); if (!task.done) onTaskClick(task) }}
+                          >
+                            {task.title}
+                          </div>
+                        )
+                      })}
+                      {hidden > 0 && (
+                        <div className="month-ev-more">+{hidden} more</div>
+                      )}
                     </div>
-                  ))}
-                  {dayTasks.slice(0, 1).map(task => (
-                    <div
-                      key={task.id}
-                      className="month-ev month-task-ev"
-                      onClick={e => { e.stopPropagation(); onEventClick(task) }}
-                    >
-                      {task.title}
-                    </div>
-                  ))}
-                  {(dayEvs.length + dayTasks.length) > 3 && (
-                    <div className="month-ev-more">+{dayEvs.length + dayTasks.length - 3} more</div>
-                  )}
-                </div>
+                  )
+                })()}
               </div>
             )
           })}
@@ -1690,6 +1713,7 @@ export default function Schedule() {
               tasks={tasks}
               onDayClick={handleMonthDayClick}
               onEventClick={openEdit}
+              onTaskClick={handleTaskClick}
             />
           ) : (
             <WeekGrid
@@ -1826,6 +1850,7 @@ export default function Schedule() {
           </div>
 
           <div className="view-toggle">
+            {!isMobile && <span className="vt-spacer" />}
             {(isMobile ? ['day','month'] : ['day','week','month']).map(v => (
               <button key={v} className={`vt-btn${view === v ? ' vt-active' : ''}`} onClick={() => setView(v)}>
                 {v.charAt(0).toUpperCase() + v.slice(1)}
@@ -1840,6 +1865,13 @@ export default function Schedule() {
                 Planner
               </button>
             )}
+            {!isMobile && (
+              <button className="ib-btn ib-add vt-add-btn" onClick={() => openAdd(todayStr(), '', '')} aria-label="Add event">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" width="16" height="16">
+                  <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+                </svg>
+              </button>
+            )}
           </div>
 
           {view === 'month' ? (
@@ -1849,6 +1881,7 @@ export default function Schedule() {
               tasks={tasks}
               onDayClick={handleMonthDayClick}
               onEventClick={openEdit}
+              onTaskClick={handleTaskClick}
             />
           ) : (
             <WeekGrid
@@ -1869,12 +1902,6 @@ export default function Schedule() {
 
       </div>
 
-      {/* FAB — add event (desktop) */}
-      <button className="fab" onClick={() => openAdd(todayStr(), '', '')} aria-label="Add event">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-          <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
-        </svg>
-      </button>
 
       {modal && (
         <EventModal

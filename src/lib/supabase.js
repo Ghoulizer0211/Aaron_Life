@@ -13,4 +13,7 @@ if (!url || !key) {
 export const supabase = (url && key) ? createClient(url, key) : null
 
 // Supabase query builder is thenable but not a full Promise — wrap to get .catch
-export const sb = (query) => Promise.resolve(query).catch(() => {})
+export const sb = (query) => Promise.resolve(query).then(res => {
+  if (res?.error) console.error('[supabase]', res.error)
+  return res
+}).catch(err => console.error('[supabase]', err))

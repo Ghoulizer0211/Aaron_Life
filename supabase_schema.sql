@@ -108,6 +108,7 @@ create table events (
   color      text,                       -- hex color string e.g. '#00e5ff'
   location   text,
   notes      text,
+  done       boolean not null default false,
   created_at timestamptz default now()
 );
 
